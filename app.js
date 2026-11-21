@@ -41,6 +41,28 @@ const App = {
     timerRunning: false,
     openArchiveId: null,
   },
+  speak: {
+    mode: "monoloog", // "monoloog" | "gesprek_oefen" | "gesprek_examen"
+    wfId: "wf20",
+    doelId: "vertellen",
+    loading: false,
+    busy: false,
+    helperOpen: false,
+    ttsEnabled: true,
+    ttsRate: 0.95,
+    timerId: null,
+    timerRunning: false,
+    recorder: null,
+    recChunks: [],
+    recStream: null,
+    recStartMs: 0,
+    recTickId: null,
+    recSeconds: 0,
+    recMode: null, // "monoloog" | "gesprek"
+    monologue: null,
+    dialogue: null,
+    openArchiveId: null,
+  },
 };
 
 function defaultProgress() {
@@ -540,6 +562,7 @@ function switchTab(tabId, subtabId = null) {
   if (subtabId) switchSubtab(subtabId);
   if (tabId === "dashboard") renderDashboard();
   if (tabId === "schrijven") renderWritingModule();
+  if (tabId === "spreken") renderSpeakingModule();
   if (tabId === "drill") renderVocabStage();
 }
 
@@ -707,8 +730,9 @@ function renderDashboard() {
       const catBadge = e.poging2
         ? `${renderCategoryBadge(e.poging1.scorePct)} → ${renderCategoryBadge(e.poging2.scorePct)}`
         : renderCategoryBadge(e.scorePct);
+      const clickable = e.id && (e.domein === "schrijven" || e.domein === "monoloog" || e.domein === "gesprek");
       return `
-      <div class="history-row${e.domein === "schrijven" && e.id ? " clickable" : ""}" ${e.domein === "schrijven" && e.id ? `data-open-eval="${escapeHtml(e.id)}"` : ""}>
+      <div class="history-row${clickable ? " clickable" : ""}" ${clickable ? `data-open-eval="${escapeHtml(e.id)}" data-open-eval-domain="${escapeHtml(e.domein)}"` : ""}>
         <div>
           <strong>${escapeHtml(e.titel || e.domein)}</strong>
           <div class="muted">${new Date(e.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(e.submodus || e.domein)}${e.heeftVerbetering ? " · inclusief verbeterpoging" : ""}</div>
@@ -2376,6 +2400,1044 @@ function handleWritingWorkspaceClick(e) {
   }
 }
 
+/* ---------- Tab 3: Spreken & Gesprek (38% · Gemini Audio + Fallback) ---------- */
+
+const SPEAKING_MODES = [
+  { id: "monoloog", label: "Monoloog (Thuisopdracht · 8%)", strict: false },
+  { id: "gesprek_oefen", label: "Gesprek — Oefenmodus (30%)", strict: false },
+  { id: "gesprek_examen", label: "Gesprek — Strikte Examenmodus (30%)", strict: true },
+];
+
+const ORAL_CRITERIA = [
+  { id: "taakvoltooiing", naam: "Taakvoltooiing & inhoud", max: 4, rubric: "Doel bereikt, alle spreek-/gesprekspunten uitgewerkt, spontane en relevante reacties." },
+  { id: "woordenschat", naam: "Woordenschat", max: 3, rubric: "Vrij brede B1-woordenschat, correcte vaste uitdrukkingen en woordcombinaties." },
+  { id: "grammatica", naam: "Grammatica & zinsbouw", max: 4, rubric: "Goede beheersing van vervoegingen, tijden en zinsbouw; fouten storen begrip niet." },
+  { id: "tekststructuur", naam: "Structuur, signaalwoorden & interactie", max: 3, rubric: "Herkenbare opbouw (inleiding/midden/slot) met signaalwoorden; bij gesprek: openen, gaande houden en afsluiten." },
+  { id: "register", naam: "Register & beleefdheid", max: 2, rubric: "Gepast register (tu/vous, conditionnel de politesse) en beleefdheidsconventies." },
+  { id: "uitspraak_vlotheid", naam: "Uitspraak, intonatie & vlotheid", max: 4, rubric: "Voldoende heldere Franse uitspraak, klanken, liaison/intonatie en vlot spreektempo ondanks korte pauzes." },
+];
+
+const DIALOGUE_HELP_PHRASES = {
+  openen: ["Bonjour Madame / Monsieur, je viens pour...", "Salut ! Je voulais te parler de..."],
+  herhalen: ["Excusez-moi, pourriez-vous répéter ?", "Pourriez-vous parler un peu plus lentement ?", "Je n'ai pas bien compris, que voulez-vous dire ?"],
+  mening: ["À mon avis...", "Je trouve que...", "D'un côté..., mais d'un autre côté..."],
+  afsluiten: ["Merci beaucoup pour votre aide !", "Au revoir et bonne journée !", "À bientôt !"],
+};
+
+function showSpeakError(msg) {
+  const el = document.getElementById("speak-error");
+  if (!el) return;
+  if (!msg) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function speakExaminer(text, rate = App.speak.ttsRate) {
+  if (!("speechSynthesis" in window) || !text) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "fr-FR";
+  utter.rate = rate;
+  const voices = window.speechSynthesis.getVoices?.() || [];
+  const frVoice = voices.find((v) => v.lang?.toLowerCase().startsWith("fr"));
+  if (frVoice) utter.voice = frVoice;
+  window.speechSynthesis.speak(utter);
+}
+
+function stopSpeakTimer() {
+  if (App.speak.timerId) {
+    clearInterval(App.speak.timerId);
+    App.speak.timerId = null;
+  }
+  App.speak.timerRunning = false;
+}
+
+function startSpeakTimer(targetObj) {
+  if (!targetObj) return;
+  stopSpeakTimer();
+  App.speak.timerRunning = true;
+  App.speak.timerId = setInterval(() => {
+    if (targetObj.timerSecondsLeft > 0) {
+      targetObj.timerSecondsLeft -= 1;
+    } else {
+      targetObj.timerOvertime = (targetObj.timerOvertime || 0) + 1;
+    }
+    const disp = document.getElementById("speak-timer-display");
+    if (disp) {
+      const over = targetObj.timerSecondsLeft <= 0;
+      disp.classList.toggle("overtime", over);
+      disp.textContent = over
+        ? `00:00 (tijd om · +${formatTimer(targetObj.timerOvertime || 0)})`
+        : formatTimer(targetObj.timerSecondsLeft);
+    }
+  }, 1000);
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = String(reader.result || "");
+      const idx = res.indexOf(",");
+      resolve(idx >= 0 ? res.slice(idx + 1) : res);
+    };
+    reader.onerror = () => reject(new Error("Kon audio niet inlezen."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function pickAudioMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const prefs = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  return prefs.find((m) => MediaRecorder.isTypeSupported?.(m)) || "";
+}
+
+function cleanupRecorder() {
+  if (App.speak.recTickId) {
+    clearInterval(App.speak.recTickId);
+    App.speak.recTickId = null;
+  }
+  if (App.speak.recStream) {
+    App.speak.recStream.getTracks().forEach((t) => t.stop());
+    App.speak.recStream = null;
+  }
+  App.speak.recorder = null;
+  App.speak.recMode = null;
+}
+
+async function startAudioRecording(mode) {
+  if (App.speak.recorder || App.speak.busy) return;
+  showSpeakError("");
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    showSpeakError("Microfoonopname wordt op deze pagina/browser niet ondersteund (mogelijk door HTTP zonder HTTPS). Gebruik 'Audio uploaden' of de tekstinvoer hieronder.");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = pickAudioMimeType();
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    App.speak.recStream = stream;
+    App.speak.recorder = recorder;
+    App.speak.recChunks = [];
+    App.speak.recMode = mode;
+    App.speak.recStartMs = Date.now();
+    App.speak.recSeconds = 0;
+
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) App.speak.recChunks.push(ev.data);
+    };
+
+    recorder.onstop = async () => {
+      const rawMime = (recorder.mimeType || mimeType || "audio/webm").split(";")[0];
+      const blob = new Blob(App.speak.recChunks, { type: rawMime });
+      const durationSec = Math.max(1, Math.round((Date.now() - App.speak.recStartMs) / 1000));
+      const finishedMode = App.speak.recMode;
+      cleanupRecorder();
+
+      if (blob.size < 400) {
+        showSpeakError("De opname was te kort of stil. Probeer opnieuw te spreken.");
+        renderSpeakingModule();
+        return;
+      }
+
+      try {
+        const base64 = await blobToBase64(blob);
+        if (finishedMode === "monoloog" && App.speak.monologue) {
+          if (App.speak.monologue.audioUrl) URL.revokeObjectURL(App.speak.monologue.audioUrl);
+          App.speak.monologue.audioBase64 = base64;
+          App.speak.monologue.audioMime = rawMime;
+          App.speak.monologue.audioUrl = URL.createObjectURL(blob);
+          App.speak.monologue.audioSec = durationSec;
+          App.speak.monologue.audioDirty = true;
+          renderSpeakingModule();
+        } else if (finishedMode === "gesprek" && App.speak.dialogue) {
+          await sendDialogueTurn({ audioBase64: base64, audioMime: rawMime });
+        }
+      } catch (err) {
+        showSpeakError(err.message);
+        renderSpeakingModule();
+      }
+    };
+
+    recorder.start(250);
+    const maxSec = mode === "monoloog" ? 180 : 90;
+    App.speak.recTickId = setInterval(() => {
+      App.speak.recSeconds = Math.floor((Date.now() - App.speak.recStartMs) / 1000);
+      const el = document.getElementById("speak-rec-timer");
+      if (el) el.textContent = `${formatTimer(App.speak.recSeconds)} / ${formatTimer(maxSec)}`;
+      if (App.speak.recSeconds >= maxSec) stopAudioRecording();
+    }, 500);
+    renderSpeakingModule();
+  } catch (err) {
+    cleanupRecorder();
+    showSpeakError(`Geen toegang tot microfoon (${err.name || "geweigerd"}). Gebruik 'Audio uploaden' of de tekstinvoer.`);
+    renderSpeakingModule();
+  }
+}
+
+function stopAudioRecording() {
+  if (App.speak.recorder && App.speak.recorder.state !== "inactive") {
+    App.speak.recorder.stop();
+  }
+}
+
+async function handleAudioFileUpload(file, mode) {
+  if (!file) return;
+  showSpeakError("");
+  if (file.size > 9 * 1024 * 1024) {
+    showSpeakError("Audiobestand is te groot (max. 9 MB).");
+    return;
+  }
+  const mime = (file.type || "audio/mp4").split(";")[0];
+  try {
+    const base64 = await blobToBase64(file);
+    if (mode === "monoloog" && App.speak.monologue) {
+      if (App.speak.monologue.audioUrl) URL.revokeObjectURL(App.speak.monologue.audioUrl);
+      App.speak.monologue.audioBase64 = base64;
+      App.speak.monologue.audioMime = mime;
+      App.speak.monologue.audioUrl = URL.createObjectURL(file);
+      App.speak.monologue.audioSec = null;
+      App.speak.monologue.audioDirty = true;
+      renderSpeakingModule();
+    } else if (mode === "gesprek" && App.speak.dialogue) {
+      await sendDialogueTurn({ audioBase64: base64, audioMime: mime });
+    }
+  } catch (err) {
+    showSpeakError(err.message);
+  }
+}
+
+function initSpeakingModule() {
+  const wfSel = document.getElementById("speak-wf-select");
+  wfSel.innerHTML = App.curriculum.woordvelden
+    .map((wf) => `<option value="${wf.id}">${String(wf.nummer).padStart(2, "0")} · ${escapeHtml(wf.titel_nl)}</option>`)
+    .join("");
+  wfSel.value = App.speak.wfId;
+
+  const doelSel = document.getElementById("speak-doel-select");
+  doelSel.innerHTML = App.curriculum.communicatieve_doelen
+    .map((d) => `<option value="${d.id}">${escapeHtml(d.naam)}</option>`)
+    .join("");
+  doelSel.value = App.speak.doelId;
+
+  renderSpeakingModeBar();
+}
+
+function renderSpeakingModeBar() {
+  const bar = document.getElementById("speak-mode-bar");
+  bar.innerHTML = SPEAKING_MODES.map(
+    (m) => `<button type="button" class="mode-btn${m.id === App.speak.mode ? " active" : ""}" data-speak-mode="${m.id}" role="tab">${escapeHtml(m.label)}</button>`
+  ).join("");
+  const isStrictExam = App.speak.mode === "gesprek_examen";
+  document.querySelectorAll("#speak-setup-row .drill-field").forEach((f) => f.classList.toggle("hidden", isStrictExam));
+  document.getElementById("btn-speak-random").classList.toggle("hidden", isStrictExam);
+  document.getElementById("btn-speak-generate").textContent =
+    App.speak.mode === "monoloog"
+      ? "✨ Genereer spreekopdracht (Monoloog)"
+      : isStrictExam
+        ? "✨ Start strikt examengesprek"
+        : "✨ Genereer gesprekscasus";
+}
+
+function pickRandomSpeakingPair() {
+  const wfs = App.curriculum.woordvelden;
+  const doelen = App.curriculum.communicatieve_doelen;
+  App.speak.wfId = wfs[Math.floor(Math.random() * wfs.length)].id;
+  App.speak.doelId = doelen[Math.floor(Math.random() * doelen.length)].id;
+  document.getElementById("speak-wf-select").value = App.speak.wfId;
+  document.getElementById("speak-doel-select").value = App.speak.doelId;
+}
+
+async function generateSpeakingAssignment() {
+  if (!canUseAi()) {
+    showSpeakError("Stel eerst je Gemini API-key in via Instellingen.");
+    return;
+  }
+  stopSpeakTimer();
+  stopAudioRecording();
+  showSpeakError("");
+  App.speak.loading = true;
+  App.speak.helperOpen = false;
+  renderSpeakingModule();
+
+  try {
+    const isStrictExam = App.speak.mode === "gesprek_examen";
+    const wfs = App.curriculum.woordvelden;
+    const doelen = App.curriculum.communicatieve_doelen;
+    const wf = isStrictExam
+      ? wfs[Math.floor(Math.random() * wfs.length)]
+      : (wfs.find((w) => w.id === App.speak.wfId) || wfs[0]);
+    const doel = isStrictExam
+      ? doelen[Math.floor(Math.random() * doelen.length)]
+      : (doelen.find((d) => d.id === App.speak.doelId) || doelen[0]);
+    const sampleWords = shuffleArray(wf.woorden).slice(0, 8).map((w) => w.fr).join(", ");
+
+    if (App.speak.mode === "monoloog") {
+      const prompt = [
+        `Je bent examenmaker voor Vlaamse Examencommissie 'Frans 2' (2de graad, B1).`,
+        `Maak 1 realistische spreekopdracht (Monoloog thuisopdracht, 8%, ca. 2-3 minuten spreken).`,
+        `Thema: ${wf.titel_nl} (sfeerwoorden: ${sampleWords}). Doel: ${doel.naam} (${doel.beschrijving}).`,
+        `Geef UITSLUITEND geldig JSON terug: {"titel":"korte NL titel","thema":"${wf.titel_nl}","doel":"${doel.naam}","context":"heldere NL opdrachtomschrijving (2-3 zinnen)","register":"neutraal/formeel (vous) of informeel (tu)","richtduur":"2-3 minuten","spreekpunten":["punt 1","punt 2","punt 3","punt 4"]}`,
+      ].join("\n\n");
+      const task = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 700, temperature: 0.65 });
+      App.speak.monologue = {
+        id: `mono_${Date.now()}`,
+        task,
+        plan: "",
+        timerTotalSeconds: 600,
+        timerSecondsLeft: 600,
+        timerOvertime: 0,
+        audioBase64: null,
+        audioMime: null,
+        audioUrl: null,
+        audioSec: null,
+        audioDirty: false,
+        textFallback: "",
+        poging1: null,
+        poging2: null,
+        revising: false,
+        revisionMandatory: false,
+        archiveId: null,
+      };
+      startSpeakTimer(App.speak.monologue);
+    } else {
+      const prompt = [
+        `Je bent examenmaker voor Vlaamse Examencommissie 'Frans 2' (2de graad, B1).`,
+        `Maak 1 realistische casus voor het Mondeling Gesprek (30%, 15 min voorbereiding + 10 min rollenspel met examinator).`,
+        `Thema: ${wf.titel_nl} (sfeerwoorden: ${sampleWords}). Doel: ${doel.naam} (${doel.beschrijving}).`,
+        `Geef UITSLUITEND geldig JSON terug: {"titel":"korte NL titel","thema":"${wf.titel_nl}","doel":"${doel.naam}","rol_leerling":"wie de leerling speelt (NL)","rol_examinator":"wie de examinator speelt (NL)","register":"neutraal/formeel (vous) of informeel (tu)","context":"heldere NL situatie (2-3 zinnen)","gesprekspunten":["punt 1","punt 2","punt 3","punt 4"],"openingszin_examinator":"korte, natuurlijke Franse openingszin waarmee de examinator het gesprek start"}`,
+      ].join("\n\n");
+      const casus = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 800, temperature: 0.65 });
+      App.speak.dialogue = {
+        id: `gespr_${Date.now()}`,
+        strict: isStrictExam,
+        casus,
+        phase: "prep", // "prep" | "dialogue" | "evaluated"
+        scratchpad: "",
+        timerTotalSeconds: 900, // 15 min prep
+        timerSecondsLeft: 900,
+        timerOvertime: 0,
+        turns: [], // [{ role: "examiner"|"student", text, pronNote? }]
+        evaluation: null,
+      };
+      startSpeakTimer(App.speak.dialogue);
+    }
+  } catch (err) {
+    showSpeakError(err.message);
+  } finally {
+    App.speak.loading = false;
+    renderSpeakingModule();
+  }
+}
+
+function normalizeOralEval(res) {
+  const rawCriteria = Array.isArray(res.criteria) ? res.criteria : [];
+  const byId = new Map(rawCriteria.map((cr) => [String(cr.id || "").toLowerCase(), cr]));
+  const normalized = ORAL_CRITERIA.map((def) => {
+    const found = byId.get(def.id) || rawCriteria.find((cr) => String(cr.naam || "").toLowerCase().includes(def.naam.slice(0, 6).toLowerCase()));
+    const rawScore = Number(found?.score);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(def.max, Math.round(rawScore))) : 0;
+    return { id: def.id, naam: def.naam, score, max: def.max, feedback: found?.feedback || "" };
+  });
+  const maxTotal = normalized.reduce((s, cr) => s + cr.max, 0);
+  const totaalOp20 = normalized.reduce((s, cr) => s + cr.score, 0);
+  const scorePct = Math.round((totaalOp20 / Math.max(1, maxTotal)) * 100);
+  return {
+    totaalOp20,
+    scorePct,
+    transcript: res.transcript || "",
+    samenvatting: res.samenvatting || "",
+    uitspraakFeedback: res.uitspraakFeedback || "",
+    sterktes: Array.isArray(res.sterktes) ? res.sterktes : [],
+    criteria: normalized,
+    fouten: Array.isArray(res.fouten) ? res.fouten : [],
+  };
+}
+
+async function evaluateMonologue() {
+  const m = App.speak.monologue;
+  if (!m || !canUseAi()) return;
+
+  const hasAudio = Boolean(m.audioBase64 && m.audioDirty);
+  const hasText = countWords(m.textFallback) >= 15;
+  if (!hasAudio && !hasText) {
+    showSpeakError(m.revising ? "Neem eerst een nieuwe verbeterde audio-opname op (of vul de tekst-fallback aan)." : "Neem eerst je Franse monoloog op (of upload een audio-opname).");
+    return;
+  }
+
+  const isRevision = Boolean(m.poging1 && m.revising);
+  stopSpeakTimer();
+  showSpeakError("");
+  App.speak.busy = true;
+  renderSpeakingModule();
+
+  try {
+    const critLines = ORAL_CRITERIA.map((c) => `- ${c.id} (${c.naam}, max ${c.max}): ${c.rubric}`).join("\n");
+    const prevBlock = isRevision
+      ? `\nDit is een VERBETER-OPNAME (vorige score: ${m.poging1.totaalOp20}/20). Vorige verbeterpunten: ${(m.poging1.fouten || []).map((f) => f.uitleg).join("; ")}. Beoordeel streng op deze nieuwe opname en benoem concreet wat verbeterd is.`
+      : "";
+
+    const promptText = [
+      `Je bent een strenge, eerlijke examinator van de Vlaamse Examencommissie 'Frans 2' (2de graad, niveau B1).`,
+      `Beoordeel deze gesproken Franse Monoloog (thuisopdracht, 8%).`,
+      `Opdracht: ${m.task.titel}\nContext: ${m.task.context}\nRegister: ${m.task.register} · Spreekpunten: ${(m.task.spreekpunten || []).join(" | ")}`,
+      hasAudio
+        ? `Luister aandachtig naar de bijgevoegde audio-opname. Transcribeer EERST letterlijk wat de leerling in het Frans zegt (inclusief eventuele spreekfouten, aarzelingen of verkeerde vormen) en beoordeel daarna ook echt de uitspraak, klanken, liaison, intonatie en vlotheid.`
+        : `Tekst-fallback (geen audio beschikbaar, beoordeel uitspraak_vlotheid conservatief op max 2/4 met melding):\n"""\n${m.textFallback.trim()}\n"""`,
+      `Criteria (som maxima = 20; 10/20 = minimum om te slagen voor B1, geen troostpunten):\n${critLines}${prevBlock}`,
+      `Geef UITSLUITEND geldig JSON terug: {"transcript":"letterlijke Franse transcriptie","samenvatting":"2 korte NL zinnen","uitspraakFeedback":"concrete NL feedback over Franse klanken, liaison, intonatie en tempo","sterktes":["..."],"criteria":[{"id":"taakvoltooiing","naam":"Taakvoltooiing & inhoud","score":3,"max":4,"feedback":"1 korte NL zin"}],"fouten":[{"citaat":"letterlijk uit transcript","type":"uitspraak|grammatica|woordenschat|structuur|register","uitleg":"korte NL uitleg","tip":"concrete oefentip"}]}`,
+    ].join("\n\n");
+
+    const parts = [{ text: promptText }];
+    if (hasAudio) {
+      parts.push({ inlineData: { mimeType: m.audioMime, data: m.audioBase64 } });
+    }
+
+    const res = await callGemini({
+      contents: [{ role: "user", parts }],
+      jsonMode: true,
+      maxOutputTokens: 1600,
+      temperature: 0.15,
+    });
+    const ev = normalizeOralEval(res);
+    ev.datum = new Date().toISOString();
+    m.audioDirty = false;
+
+    if (!isRevision) {
+      m.poging1 = ev;
+      const needsRev = ev.scorePct < 85 || ev.fouten.length > 0;
+      m.revising = needsRev;
+      m.revisionMandatory = needsRev;
+      m.archiveId = m.id;
+      App.progress.evaluaties.push({
+        id: m.id,
+        datum: ev.datum,
+        domein: "monoloog",
+        submodus: "Monoloog (thuisopdracht · 8%)",
+        titel: m.task.titel,
+        scorePct: ev.scorePct,
+        totaalOp20: ev.totaalOp20,
+        opdracht: m.task,
+        poging1: ev,
+        poging2: null,
+        heeftVerbetering: false,
+      });
+    } else {
+      m.poging2 = ev;
+      m.revising = false;
+      m.revisionMandatory = false;
+      const entry = App.progress.evaluaties.find((e) => e.id === m.archiveId);
+      if (entry) {
+        entry.poging2 = ev;
+        entry.heeftVerbetering = true;
+        entry.verbeterdPct = ev.scorePct;
+      }
+    }
+    scheduleSaveProgress();
+  } catch (err) {
+    showSpeakError(err.message);
+  } finally {
+    App.speak.busy = false;
+    renderSpeakingModule();
+  }
+}
+
+/* ---------- Dialogue (30% · 15 min prep + 10 min interactive examiner) ---------- */
+
+function startDialoguePhase() {
+  const d = App.speak.dialogue;
+  if (!d) return;
+  d.phase = "dialogue";
+  d.timerTotalSeconds = 600; // 10 min gesprek
+  d.timerSecondsLeft = 600;
+  d.timerOvertime = 0;
+  const opening = d.casus.openingszin_examinator || "Bonjour ! Installez-vous. Je vous écoute.";
+  d.turns = [{ role: "examiner", text: opening }];
+  startSpeakTimer(d);
+  renderSpeakingModule();
+  if (App.speak.ttsEnabled) speakExaminer(opening);
+}
+
+async function sendDialogueTurn({ audioBase64 = null, audioMime = null, typedText = "" }) {
+  const d = App.speak.dialogue;
+  if (!d || d.phase !== "dialogue" || App.speak.busy) return;
+  if (!audioBase64 && !typedText.trim()) return;
+
+  showSpeakError("");
+  App.speak.busy = true;
+  renderSpeakingModule();
+
+  try {
+    const recentHistory = d.turns.slice(-8)
+      .map((t) => `${t.role === "examiner" ? "Examinator" : "Leerling"}: ${t.text}`)
+      .join("\n");
+
+    const promptText = [
+      `Je bent de Franstalige examinator tijdens een 10-minutengesprek voor Vlaamse Examencommissie 'Frans 2' (niveau B1).`,
+      `Casus: ${d.casus.titel} (${d.casus.context})\nJouw rol: ${d.casus.rol_examinator} · Rol leerling: ${d.casus.rol_leerling} · Register: ${d.casus.register}\nGesprekspunten die aan bod moeten komen: ${(d.casus.gesprekspunten || []).join(" | ")}`,
+      `Gesprek tot nu toe:\n${recentHistory}`,
+      audioBase64
+        ? `De leerling antwoordde zojuist met de bijgevoegde Franse audio. Transcribeer kort en letterlijk wat ze zei, maak 1 zeer korte interne uitspraaknotitie (max 12 woorden), en antwoord daarna natuurlijk als examinator in het Frans (2-4 zinnen, B1-niveau, blijf in je rol, stel een logische of subtiel spontane vervolgvraag).`
+        : `De leerling antwoordde (tekst-fallback): "${typedText.trim()}". Antwoord natuurlijk als examinator in het Frans (2-4 zinnen, B1-niveau, blijf in je rol, stel een logische of subtiel spontane vervolgvraag).`,
+      `Geef UITSLUITEND geldig JSON terug: {"leerlingTranscript":"letterlijke Franse tekst van leerling","uitspraakNotitie":"korte NL notitie over uitspraak/vlotheid of lege string","examinatorAntwoord":"jouw Franse antwoord als examinator"}`,
+    ].join("\n\n");
+
+    const parts = [{ text: promptText }];
+    if (audioBase64) {
+      parts.push({ inlineData: { mimeType: audioMime, data: audioBase64 } });
+    }
+
+    const res = await callGemini({
+      contents: [{ role: "user", parts }],
+      jsonMode: true,
+      maxOutputTokens: 700,
+      temperature: 0.5,
+    });
+
+    const studentText = (res.leerlingTranscript || typedText || "(onverstaanbare audio)").trim();
+    const reply = (res.examinatorAntwoord || "Très bien, pouvez-vous m'en dire un peu plus ?").trim();
+    d.turns.push({ role: "student", text: studentText, pronNote: res.uitspraakNotitie || "" });
+    d.turns.push({ role: "examiner", text: reply });
+
+    renderSpeakingModule();
+    if (App.speak.ttsEnabled) speakExaminer(reply);
+  } catch (err) {
+    showSpeakError(err.message);
+  } finally {
+    App.speak.busy = false;
+    renderSpeakingModule();
+    const log = document.getElementById("dialogue-log");
+    if (log) log.scrollTop = log.scrollHeight;
+  }
+}
+
+async function evaluateDialogueSession() {
+  const d = App.speak.dialogue;
+  if (!d || App.speak.busy) return;
+  const studentTurns = d.turns.filter((t) => t.role === "student");
+  if (studentTurns.length < 2) {
+    showSpeakError("Voer eerst minstens 2 spreekbeurten in het gesprek voordat je laat evalueren.");
+    return;
+  }
+
+  stopSpeakTimer();
+  stopAudioRecording();
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  showSpeakError("");
+  App.speak.busy = true;
+  renderSpeakingModule();
+
+  try {
+    const critLines = ORAL_CRITERIA.map((c) => `- ${c.id} (${c.naam}, max ${c.max}): ${c.rubric}`).join("\n");
+    const transcriptLines = d.turns
+      .map((t, i) => `${i + 1}. ${t.role === "examiner" ? "Examinator" : "Leerling"}: ${t.text}${t.pronNote ? ` [uitspraak: ${t.pronNote}]` : ""}`)
+      .join("\n");
+
+    const prompt = [
+      `Je bent een strenge, eerlijke examinator van de Vlaamse Examencommissie 'Frans 2' (2de graad, niveau B1).`,
+      `Beoordeel dit Mondeling Gesprek (30%) op basis van het volledige transcript en de uitspraaknotities.`,
+      `Casus: ${d.casus.titel} · Context: ${d.casus.context} · Register: ${d.casus.register}\nGesprekspunten: ${(d.casus.gesprekspunten || []).join(" | ")}`,
+      `Volledig gesprek:\n${transcriptLines}`,
+      `Criteria (som maxima = 20; 10/20 = minimum om te slagen voor B1, geen troostpunten; let bij gesprek extra op interactie, spontaan reageren, register en uitspraak):\n${critLines}`,
+      `Geef UITSLUITEND geldig JSON terug: {"samenvatting":"2 korte NL zinnen","uitspraakFeedback":"concrete NL feedback over uitspraak, vlotheid en interactie","sterktes":["..."],"criteria":[{"id":"taakvoltooiing","naam":"Taakvoltooiing & inhoud","score":3,"max":4,"feedback":"1 korte NL zin"}],"fouten":[{"citaat":"letterlijk uit leerlingbeurt","type":"uitspraak|grammatica|woordenschat|interactie|register","uitleg":"korte NL uitleg","tip":"concrete verbeteringstip"}]}`,
+    ].join("\n\n");
+
+    const res = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1500, temperature: 0.15 });
+    const ev = normalizeOralEval(res);
+    ev.datum = new Date().toISOString();
+    d.evaluation = ev;
+    d.phase = "evaluated";
+
+    App.progress.evaluaties.push({
+      id: d.id,
+      datum: ev.datum,
+      domein: "gesprek",
+      submodus: d.strict ? "Gesprek — Strikte Examenmodus (30%)" : "Gesprek — Oefenmodus (30%)",
+      titel: d.casus.titel,
+      scorePct: ev.scorePct,
+      totaalOp20: ev.totaalOp20,
+      casus: d.casus,
+      turns: d.turns,
+      evaluatie: ev,
+    });
+    scheduleSaveProgress();
+  } catch (err) {
+    showSpeakError(err.message);
+  } finally {
+    App.speak.busy = false;
+    renderSpeakingModule();
+  }
+}
+
+/* ---------- Speaking Renderers ---------- */
+
+function renderOralEvalCard(ev, prevEv = null, titlePrefix = "") {
+  const baseCard = renderEvalBreakdown(ev, prevEv, titlePrefix);
+  const extraParts = [];
+  if (ev.uitspraakFeedback) {
+    extraParts.push(`<div class="pron-box"><strong>🎙️ Uitspraak, intonatie &amp; vlotheid:</strong> ${escapeHtml(ev.uitspraakFeedback)}</div>`);
+  }
+  if (ev.transcript) {
+    extraParts.push(`<details style="margin-bottom:0.85rem;"><summary style="cursor:pointer;font-weight:600;font-size:0.88rem;">Toon jouw Franse transcriptie</summary><div class="archive-text-box" style="margin-top:0.45rem;">${escapeHtml(ev.transcript)}</div></details>`);
+  }
+  if (!extraParts.length) return baseCard;
+  return baseCard.replace(`<div class="criteria-grid">`, `${extraParts.join("")}<div class="criteria-grid">`);
+}
+
+function renderMonologueWorkspace(ws) {
+  const m = App.speak.monologue;
+  if (!m) {
+    ws.innerHTML = `
+      <div class="card empty-module">
+        <h3>Monoloog (thuisopdracht · 8%)</h3>
+        <p class="muted">Kies een thema en communicatief doel en klik op <strong>Genereer spreekopdracht</strong>. Je bereidt kort je kernwoorden voor, spreekt je Franse monoloog in (direct beoordeeld op uitspraak, structuur en woordenschat) en verbetert je opname in Stap 2.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const isRec = Boolean(App.speak.recorder && App.speak.recMode === "monoloog");
+  const over = m.timerSecondsLeft <= 0;
+  const step = !m.poging1 ? 1 : m.revising ? 2 : 3;
+  const showRecorder = !m.poging1 || m.revising;
+  const activeEval = m.poging2 || m.poging1;
+
+  const stepperHtml = `
+    <div class="write-stepper" aria-label="Voortgang monoloog">
+      <span class="step-pill ${step > 1 ? "done" : "active"}">${step > 1 ? "✓ " : ""}1. Voorbereiden &amp; opnemen</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 2 ? "active" : step > 2 ? "done" : ""}">${step > 2 ? "✓ " : ""}2. Verbeter-opname</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 3 ? "done" : ""}">${step === 3 ? "✓ " : ""}3. Afgerond</span>
+    </div>
+  `;
+
+  const topbarHtml = `
+    <div class="write-topbar">
+      <div class="timer-box">
+        <span id="speak-timer-display" class="timer-display${over ? " overtime" : ""}">
+          ${over ? `00:00 (tijd om · +${formatTimer(m.timerOvertime || 0)})` : formatTimer(m.timerSecondsLeft)}
+        </span>
+        <button type="button" class="btn btn-secondary btn-sm" data-speak-action="toggle-timer">${App.speak.timerRunning ? "Pauzeer" : "Start timer"}</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-speak-action="reset-timer">Reset</button>
+        <span class="muted" style="font-size:0.78rem;">Voorbereidingstimer (indicatief)</span>
+      </div>
+      <span class="weight-pill">Monoloog · 8%</span>
+    </div>
+  `;
+
+  const promptHtml = `
+    <div class="prompt-card">
+      <div class="prompt-meta">
+        <span class="chip chip-sm">${escapeHtml(m.task.thema)}</span>
+        <span class="chip chip-sm">Register: ${escapeHtml(m.task.register)}</span>
+        <span class="chip chip-sm">Richtduur: ${escapeHtml(m.task.richtduur || "2-3 min")}</span>
+      </div>
+      <h3>${escapeHtml(m.task.titel)}</h3>
+      <p style="margin:0 0 0.5rem;">${escapeHtml(m.task.context)}</p>
+      <ul class="req-list">${(m.task.spreekpunten || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
+    </div>
+  `;
+
+  const revisionGuideHtml = m.revising && m.poging1
+    ? `
+      <div class="card" style="margin-bottom:1rem;border-color:#f59e0b;background:var(--warn-soft);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
+          <strong>🎙️ Stap 2: Neem een verbeterde versie op</strong>
+          ${renderCategoryBadge(m.poging1.scorePct)}
+        </div>
+        ${m.poging1.uitspraakFeedback ? `<p style="margin:0 0 0.45rem;font-size:0.88rem;"><strong>Uitspraak:</strong> ${escapeHtml(m.poging1.uitspraakFeedback)}</p>` : ""}
+        ${m.poging1.fouten.length ? `<div class="mistakes-list" style="margin-bottom:0;">
+          ${m.poging1.fouten.map((f) => `<div class="mistake-item" style="background:#fff;"><span class="mistake-quote">${escapeHtml(f.citaat)}</span> — ${escapeHtml(f.uitleg)} ${f.tip ? `<span class="muted">(Tip: ${escapeHtml(f.tip)})</span>` : ""}</div>`).join("")}
+        </div>` : ""}
+      </div>
+    `
+    : "";
+
+  const recorderBlockHtml = showRecorder
+    ? `
+      <div class="card">
+        <div class="recorder-box${isRec ? " recording" : ""}">
+          <button type="button" class="btn btn-record${isRec ? " is-recording" : ""}" data-speak-action="${isRec ? "stop-rec" : "start-rec-mono"}" ${App.speak.busy ? "disabled" : ""}>
+            ${isRec ? "⏹ Stop opname" : m.audioUrl && m.audioDirty ? "🎙️ Opnieuw opnemen" : "🎙️ Start audio-opname"}
+          </button>
+          ${isRec ? `<div id="speak-rec-timer" class="rec-timer">${formatTimer(App.speak.recSeconds)} / 03:00</div>` : ""}
+          ${m.audioUrl && m.audioDirty && !isRec ? `
+            <audio class="audio-preview" controls src="${m.audioUrl}"></audio>
+            <span class="muted">Beluister je opname of dien haar direct in voor uitspraak- en taalevaluatie.</span>
+          ` : `<span class="muted">Spreek rustig in het Frans (max. 3 min). Gemini beoordeelt zowel inhoud als uitspraak &amp; vlotheid.</span>`}
+          <div class="fallback-bar">
+            <label class="btn btn-secondary btn-sm file-label">
+              📎 Audio uploaden
+              <input id="mono-audio-upload" type="file" accept="audio/*" capture="microphone" hidden />
+            </label>
+            <button type="button" class="btn btn-primary" data-speak-action="eval-mono" ${App.speak.busy || isRec || (!m.audioDirty && countWords(m.textFallback) < 15) ? "disabled" : ""}>
+              ${App.speak.busy ? "Audio analyseren & beoordelen…" : m.revising ? "✓ Dien verbeterde opname in" : "Evalueer spreekopname (Stap 1)"}
+            </button>
+          </div>
+        </div>
+        <details style="margin-top:0.8rem;">
+          <summary class="muted" style="cursor:pointer;font-size:0.84rem;">Geen microfoon beschikbaar? Gebruik tekst-fallback</summary>
+          <textarea id="mono-text-fallback" class="scratchpad-editor" style="margin-top:0.5rem;" spellcheck="false" placeholder="Typ hier enkel als je geen microfoon kunt gebruiken…">${escapeHtml(m.textFallback)}</textarea>
+        </details>
+      </div>
+    `
+    : `
+      <div class="card">
+        <div class="stage-toolbar" style="margin-bottom:0;">
+          <strong>✓ Monoloog afgerond!</strong>
+          <button type="button" class="btn btn-primary btn-sm" data-speak-action="clear-mono">✨ Nieuwe spreekopdracht</button>
+        </div>
+      </div>
+    `;
+
+  const planPanelHtml = `
+    <aside class="helper-panel">
+      <div>
+        <h4>Spreekplan (kernwoorden — blijft zichtbaar)</h4>
+        <textarea id="mono-plan" class="scratchpad-editor" style="min-height:200px;" spellcheck="false" placeholder="Inleiding (groet + thema):\n- ...\n\nMidden (kernwoorden + signaalwoorden):\n- D'abord...\n- Ensuite...\n\nSlot:\n- En conclusion...">${escapeHtml(m.plan)}</textarea>
+      </div>
+      <div>
+        <h4>Handige signaalwoorden</h4>
+        <p class="muted" style="margin:0;font-size:0.82rem;">d'abord · ensuite · de plus · par exemple · cependant · parce que · donc · en conclusion</p>
+      </div>
+    </aside>
+  `;
+
+  ws.innerHTML = `
+    ${stepperHtml}
+    ${topbarHtml}
+    <div class="write-grid with-helper">
+      <div>
+        ${promptHtml}
+        ${revisionGuideHtml}
+        ${recorderBlockHtml}
+        ${activeEval ? renderOralEvalCard(activeEval, m.poging2 ? m.poging1 : null, m.poging2 ? "Verbeter-opname" : "Poging 1") : ""}
+      </div>
+      ${planPanelHtml}
+    </div>
+  `;
+}
+
+function renderDialogueWorkspace(ws) {
+  const d = App.speak.dialogue;
+  if (!d) {
+    ws.innerHTML = `
+      <div class="card empty-module">
+        <h3>Mondeling Gesprek (30%)</h3>
+        <p class="muted">Klik bovenaan op <strong>Genereer gesprekscasus</strong>. Je krijgt eerst een indicatieve voorbereidingstimer van 15 minuten voor je kladblad (sleutelwoorden) en voert daarna een interactief Frans gesprek van 10 minuten met de AI-examinator.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const over = d.timerSecondsLeft <= 0;
+  const isRec = Boolean(App.speak.recorder && App.speak.recMode === "gesprek");
+  const lastExaminerTurn = [...d.turns].reverse().find((t) => t.role === "examiner");
+  const studentTurnCount = d.turns.filter((t) => t.role === "student").length;
+  const step = d.phase === "prep" ? 1 : d.phase === "dialogue" ? 2 : 3;
+
+  const stepperHtml = `
+    <div class="write-stepper">
+      <span class="step-pill ${step > 1 ? "done" : "active"}">${step > 1 ? "✓ " : ""}1. Voorbereiding (15 min)</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 2 ? "active" : step > 2 ? "done" : ""}">${step > 2 ? "✓ " : ""}2. Examengesprek (10 min)</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 3 ? "done" : ""}">${step === 3 ? "✓ " : ""}3. Evaluatie</span>
+    </div>
+  `;
+
+  const topbarHtml = `
+    <div class="write-topbar">
+      <div class="timer-box">
+        <span id="speak-timer-display" class="timer-display${over ? " overtime" : ""}">
+          ${over ? `00:00 (tijd om · +${formatTimer(d.timerOvertime || 0)})` : formatTimer(d.timerSecondsLeft)}
+        </span>
+        <button type="button" class="btn btn-secondary btn-sm" data-speak-action="toggle-timer">${App.speak.timerRunning ? "Pauzeer" : "Start timer"}</button>
+        <span class="muted" style="font-size:0.78rem;">${d.phase === "prep" ? "Voorbereiding (15 min)" : "Gesprek (10 min)"} · indicatief</span>
+      </div>
+      <div class="btn-row">
+        ${d.strict
+          ? `<span class="exam-strict-badge">Strikte examenmodus · enkel audio</span>`
+          : `<button type="button" class="btn btn-secondary btn-sm" data-speak-action="toggle-helper">${App.speak.helperOpen ? "Verberg spreekhulp" : "Spreekhulp (zinnen)"}</button>`
+        }
+        <button type="button" class="btn btn-secondary btn-sm" data-speak-action="toggle-tts">${App.speak.ttsEnabled ? "🔊 Stem aan" : "🔇 Stem uit"}</button>
+      </div>
+    </div>
+  `;
+
+  const casusHtml = `
+    <div class="prompt-card">
+      <div class="prompt-meta">
+        <span class="weight-pill">Mondeling Gesprek (30%)</span>
+        <span class="chip chip-sm">${escapeHtml(d.casus.thema)}</span>
+        <span class="chip chip-sm">Register: ${escapeHtml(d.casus.register)}</span>
+      </div>
+      <h3>${escapeHtml(d.casus.titel)}</h3>
+      <p style="margin:0 0 0.4rem;">${escapeHtml(d.casus.context)}</p>
+      <div class="muted"><strong>Jouw rol:</strong> ${escapeHtml(d.casus.rol_leerling)} · <strong>Examinator:</strong> ${escapeHtml(d.casus.rol_examinator)}</div>
+      <ul class="req-list">${(d.casus.gesprekspunten || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
+    </div>
+  `;
+
+  let mainBodyHtml = "";
+  if (d.phase === "prep") {
+    mainBodyHtml = `
+      <div class="card">
+        <h3 style="margin:0 0 0.45rem;">Kladblad — noteer enkel sleutelwoorden</h3>
+        <p class="muted" style="margin:0 0 0.65rem;">Op het examen mag je je kladblad met sleutelwoorden meenemen in de cockpit. Het blijft hiernaast zichtbaar tijdens het hele gesprek.</p>
+        <textarea id="dialogue-scratchpad" class="scratchpad-editor" style="min-height:170px;" spellcheck="false" placeholder="Kernwoorden per gesprekspunt:\n- Opening:\n- Punt 1:\n- Punt 2:\n- Vraag aan examinator:\n- Afsluiting:">${escapeHtml(d.scratchpad)}</textarea>
+        <div class="btn-row" style="margin-top:0.85rem;justify-content:flex-end;">
+          <button type="button" class="btn btn-primary" data-speak-action="start-dialogue">🎙️ Start examengesprek (10 min) →</button>
+        </div>
+      </div>
+    `;
+  } else if (d.phase === "dialogue") {
+    const examinerDisplayHtml = d.strict
+      ? `
+        <div class="audio-only-examiner">
+          <div>
+            <strong>🎧 Examinator (beurt ${d.turns.filter((t) => t.role === "examiner").length})</strong>
+            <div class="muted">Tekst is verborgen in Strikte Examenmodus — luister goed of vraag <em>"Pourriez-vous répéter ?"</em></div>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary btn-sm" data-speak-action="replay-normal" ${!lastExaminerTurn ? "disabled" : ""}>🔊 Herhaal</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-speak-action="replay-slow" ${!lastExaminerTurn ? "disabled" : ""}>🐢 Trager</button>
+          </div>
+        </div>
+      `
+      : `
+        <div class="dialogue-log" id="dialogue-log">
+          ${d.turns.map((t) => `
+            <div class="bubble ${t.role === "examiner" ? "bubble-examiner" : "bubble-student"}">
+              <div class="bubble-role">
+                <span>${t.role === "examiner" ? "Examinator" : "Jij"}</span>
+                ${t.role === "examiner" ? `<button type="button" class="mini-icon-btn" data-speak-examiner="${escapeHtml(t.text)}" title="Herhaal">🔊</button>` : ""}
+              </div>
+              <div>${escapeHtml(t.text)}</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+
+    mainBodyHtml = `
+      <div class="card">
+        ${examinerDisplayHtml}
+        <div class="recorder-box${isRec ? " recording" : ""}">
+          <button type="button" class="btn btn-record${isRec ? " is-recording" : ""}" data-speak-action="${isRec ? "stop-rec" : "start-rec-dial"}" ${App.speak.busy ? "disabled" : ""}>
+            ${App.speak.busy ? "⏳ Examinator denkt na…" : isRec ? "⏹ Stop & verstuur antwoord" : "🎙️ Spreek antwoord in (of druk Spatie)"}
+          </button>
+          ${isRec ? `<div id="speak-rec-timer" class="rec-timer">${formatTimer(App.speak.recSeconds)} / 01:30</div>` : `<span class="muted">Beurten gesproken: ${studentTurnCount} · Klik om te starten, klik opnieuw om direct te verzenden.</span>`}
+          <div class="fallback-bar">
+            <label class="btn btn-secondary btn-sm file-label">
+              📎 Audio-beurt uploaden
+              <input id="dial-audio-upload" type="file" accept="audio/*" capture="microphone" hidden />
+            </label>
+            <button type="button" class="btn btn-primary btn-sm" data-speak-action="eval-dial" ${App.speak.busy || isRec || studentTurnCount < 2 ? "disabled" : ""}>
+              ✓ Beëindig &amp; evalueer gesprek
+            </button>
+          </div>
+          <div class="chat-fallback-row">
+            <input id="dialogue-chat-input" class="input" type="text" spellcheck="false" placeholder="Chat-fallback: typ een Franse reactie en druk op Enter…" ${App.speak.busy ? "disabled" : ""} />
+            <button type="button" class="btn btn-secondary" data-speak-action="send-chat" ${App.speak.busy ? "disabled" : ""}>Verzend</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    mainBodyHtml = `
+      <div class="card" style="margin-bottom:1rem;">
+        <div class="stage-toolbar" style="margin-bottom:0.5rem;">
+          <strong>✓ Volledig gesprekstranscript (${studentTurnCount} leerlingbeurten)</strong>
+          <button type="button" class="btn btn-primary btn-sm" data-speak-action="clear-dial">✨ Nieuwe gesprekscasus</button>
+        </div>
+        <div class="dialogue-log" style="max-height:320px;margin-bottom:0;">
+          ${d.turns.map((t) => `
+            <div class="bubble ${t.role === "examiner" ? "bubble-examiner" : "bubble-student"}">
+              <div class="bubble-role"><span>${t.role === "examiner" ? "Examinator" : "Jij"}</span></div>
+              <div>${escapeHtml(t.text)}</div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+      ${d.evaluation ? renderOralEvalCard(d.evaluation, null, "Examengesprek") : ""}
+    `;
+  }
+
+  const showSidePanel = d.phase === "dialogue" || (!d.strict && App.speak.helperOpen);
+  const sidePanelHtml = showSidePanel
+    ? `
+      <aside class="helper-panel">
+        ${d.phase === "dialogue" ? `
+          <div>
+            <h4>Jouw kladblad (sleutelwoorden)</h4>
+            <textarea id="dialogue-scratchpad" class="scratchpad-editor" style="min-height:170px;" spellcheck="false" placeholder="Sleutelwoorden…">${escapeHtml(d.scratchpad)}</textarea>
+          </div>
+        ` : ""}
+        ${!d.strict && App.speak.helperOpen ? `
+          <div>
+            <h4>Spreekhulp (gesprekszinnen)</h4>
+            ${Object.entries(DIALOGUE_HELP_PHRASES).map(([k, arr]) => `
+              <div class="connector-group">
+                <strong style="text-transform:capitalize;">${k}:</strong>
+                <ul class="req-list" style="margin-top:0.2rem;font-size:0.82rem;">${arr.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
+      </aside>
+    `
+    : "";
+
+  ws.innerHTML = `
+    ${stepperHtml}
+    ${topbarHtml}
+    <div class="write-grid${showSidePanel ? " with-helper" : ""}">
+      <div>
+        ${casusHtml}
+        ${mainBodyHtml}
+      </div>
+      ${sidePanelHtml}
+    </div>
+  `;
+}
+
+function renderSpeakingArchive() {
+  const wrap = document.getElementById("speak-archive");
+  const countEl = document.getElementById("speak-archive-count");
+  const items = App.progress.evaluaties.filter((e) => e.domein === "monoloog" || e.domein === "gesprek").reverse();
+  countEl.textContent = `${items.length} opgeslagen spreekoefening(en) — met transcript en 5-categorieën feedback`;
+  if (!items.length) {
+    wrap.innerHTML = `<div class="card muted">Nog geen opgeslagen monologen of gesprekken.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `<div class="archive-list">${items.map((item) => {
+    const isOpen = App.speak.openArchiveId === item.id;
+    const catHtml = item.poging2
+      ? `${renderCategoryBadge(item.poging1.scorePct)} → ${renderCategoryBadge(item.poging2.scorePct)}`
+      : renderCategoryBadge(item.scorePct);
+
+    let bodyHtml = "";
+    if (item.domein === "monoloog") {
+      bodyHtml = `
+        <p class="muted" style="margin:0.75rem 0 0.5rem;">${escapeHtml(item.opdracht?.context || "")}</p>
+        ${item.poging1 ? renderOralEvalCard(item.poging1, null, "Poging 1") : ""}
+        ${item.poging2 ? renderOralEvalCard(item.poging2, item.poging1, "Verbeter-opname") : ""}
+      `;
+    } else {
+      const turnsHtml = (item.turns || []).map((t) => `
+        <div class="bubble ${t.role === "examiner" ? "bubble-examiner" : "bubble-student"}">
+          <div class="bubble-role"><span>${t.role === "examiner" ? "Examinator" : "Jij"}</span></div>
+          <div>${escapeHtml(t.text)}</div>
+        </div>
+      `).join("");
+      bodyHtml = `
+        <p class="muted" style="margin:0.75rem 0 0.5rem;">${escapeHtml(item.casus?.context || "")}</p>
+        <div class="dialogue-log" style="max-height:260px;">${turnsHtml}</div>
+        ${item.evaluatie ? renderOralEvalCard(item.evaluatie, null, "Examengesprek") : ""}
+      `;
+    }
+
+    return `
+      <details class="archive-item" data-archive-id="${escapeHtml(item.id)}"${isOpen ? " open" : ""}>
+        <summary class="archive-summary">
+          <div>
+            <strong>${escapeHtml(item.titel)}</strong>
+            <div class="muted">${new Date(item.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(item.submodus || item.domein)}</div>
+          </div>
+          <div class="btn-row" style="gap:0.35rem;">${catHtml}</div>
+        </summary>
+        <div class="archive-body">${bodyHtml}</div>
+      </details>
+    `;
+  }).join("")}</div>`;
+}
+
+function renderSpeakingModule() {
+  if (!App.curriculum) return;
+  renderSpeakingModeBar();
+  renderSpeakingArchive();
+  const ws = document.getElementById("speak-workspace");
+  if (App.speak.loading) {
+    ws.innerHTML = `<div class="card empty-module"><p class="muted">✨ Realistische B1-spreekopdracht wordt gegenereerd…</p></div>`;
+    return;
+  }
+  if (App.speak.mode === "monoloog") {
+    renderMonologueWorkspace(ws);
+  } else {
+    renderDialogueWorkspace(ws);
+  }
+}
+
+function handleSpeakingWorkspaceClick(e) {
+  const speakEx = e.target.closest("[data-speak-examiner]");
+  if (speakEx) {
+    speakExaminer(speakEx.dataset.speakExaminer);
+    return;
+  }
+
+  const actBtn = e.target.closest("[data-speak-action]");
+  if (!actBtn) return;
+  const act = actBtn.dataset.speakAction;
+  const activeObj = App.speak.mode === "monoloog" ? App.speak.monologue : App.speak.dialogue;
+
+  if (act === "toggle-timer" && activeObj) {
+    if (App.speak.timerRunning) stopSpeakTimer();
+    else startSpeakTimer(activeObj);
+    renderSpeakingModule();
+  } else if (act === "reset-timer" && activeObj) {
+    stopSpeakTimer();
+    activeObj.timerSecondsLeft = activeObj.timerTotalSeconds;
+    activeObj.timerOvertime = 0;
+    renderSpeakingModule();
+  } else if (act === "toggle-helper") {
+    App.speak.helperOpen = !App.speak.helperOpen;
+    renderSpeakingModule();
+  } else if (act === "toggle-tts") {
+    App.speak.ttsEnabled = !App.speak.ttsEnabled;
+    if (!App.speak.ttsEnabled && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    renderSpeakingModule();
+  } else if (act === "start-rec-mono") {
+    startAudioRecording("monoloog");
+  } else if (act === "start-rec-dial") {
+    startAudioRecording("gesprek");
+  } else if (act === "stop-rec") {
+    stopAudioRecording();
+  } else if (act === "eval-mono") {
+    evaluateMonologue();
+  } else if (act === "clear-mono") {
+    stopSpeakTimer();
+    App.speak.monologue = null;
+    renderSpeakingModule();
+  } else if (act === "start-dialogue") {
+    startDialoguePhase();
+  } else if (act === "replay-normal" || act === "replay-slow") {
+    const lastEx = [...(App.speak.dialogue?.turns || [])].reverse().find((t) => t.role === "examiner");
+    if (lastEx) speakExaminer(lastEx.text, act === "replay-slow" ? 0.8 : 0.98);
+  } else if (act === "send-chat") {
+    const inp = document.getElementById("dialogue-chat-input");
+    if (inp && inp.value.trim()) {
+      const txt = inp.value.trim();
+      inp.value = "";
+      sendDialogueTurn({ typedText: txt });
+    }
+  } else if (act === "eval-dial") {
+    evaluateDialogueSession();
+  } else if (act === "clear-dial") {
+    stopSpeakTimer();
+    App.speak.dialogue = null;
+    renderSpeakingModule();
+  }
+}
+
 /* ---------- Settings Modal ---------- */
 
 function updateApiIndicator() {
@@ -2507,11 +3569,83 @@ function bindEvents() {
     if (grBtn) switchTab("drill", "grammar");
     const evalRow = e.target.closest("[data-open-eval]");
     if (evalRow) {
-      App.write.openArchiveId = evalRow.dataset.openEval;
-      switchTab("schrijven");
-      const target = document.querySelector(`[data-archive-id="${CSS.escape(App.write.openArchiveId)}"]`);
+      const id = evalRow.dataset.openEval;
+      const dom = evalRow.dataset.openEvalDomain || "schrijven";
+      if (dom === "monoloog" || dom === "gesprek") {
+        App.speak.openArchiveId = id;
+        switchTab("spreken");
+      } else {
+        App.write.openArchiveId = id;
+        switchTab("schrijven");
+      }
+      const target = document.querySelector(`[data-archive-id="${CSS.escape(id)}"]`);
       if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  });
+
+  document.getElementById("speak-mode-bar").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-speak-mode]");
+    if (!btn) return;
+    stopSpeakTimer();
+    stopAudioRecording();
+    App.speak.mode = btn.dataset.speakMode;
+    renderSpeakingModule();
+  });
+
+  document.getElementById("speak-wf-select").addEventListener("change", (e) => {
+    App.speak.wfId = e.target.value;
+  });
+
+  document.getElementById("speak-doel-select").addEventListener("change", (e) => {
+    App.speak.doelId = e.target.value;
+  });
+
+  document.getElementById("btn-speak-random").addEventListener("click", pickRandomSpeakingPair);
+  document.getElementById("btn-speak-generate").addEventListener("click", generateSpeakingAssignment);
+
+  const speakWs = document.getElementById("speak-workspace");
+  speakWs.addEventListener("click", handleSpeakingWorkspaceClick);
+  speakWs.addEventListener("input", (e) => {
+    if (e.target.id === "mono-plan" && App.speak.monologue) {
+      App.speak.monologue.plan = e.target.value;
+    } else if (e.target.id === "mono-text-fallback" && App.speak.monologue) {
+      App.speak.monologue.textFallback = e.target.value;
+      const evalBtn = speakWs.querySelector('[data-speak-action="eval-mono"]');
+      if (evalBtn) evalBtn.disabled = App.speak.busy || (!App.speak.monologue.audioDirty && countWords(e.target.value) < 15);
+    } else if (e.target.id === "dialogue-scratchpad" && App.speak.dialogue) {
+      App.speak.dialogue.scratchpad = e.target.value;
+    }
+  });
+  speakWs.addEventListener("change", (e) => {
+    if (e.target.id === "mono-audio-upload" && e.target.files?.[0]) {
+      handleAudioFileUpload(e.target.files[0], "monoloog");
+      e.target.value = "";
+    } else if (e.target.id === "dial-audio-upload" && e.target.files?.[0]) {
+      handleAudioFileUpload(e.target.files[0], "gesprek");
+      e.target.value = "";
+    }
+  });
+  speakWs.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "dialogue-chat-input") {
+      e.preventDefault();
+      const txt = e.target.value.trim();
+      if (txt) {
+        e.target.value = "";
+        sendDialogueTurn({ typedText: txt });
+      }
+    }
+  });
+
+  // Spatiebalk Start/Stop spreekknop tijdens actief Gesprek (wanneer geen invoerveld gefocust is)
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || e.repeat) return;
+    if (App.activeTab !== "spreken" || App.speak.mode === "monoloog") return;
+    if (!App.speak.dialogue || App.speak.dialogue.phase !== "dialogue" || App.speak.busy) return;
+    const tag = (document.activeElement?.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+    e.preventDefault();
+    if (App.speak.recorder) stopAudioRecording();
+    else startAudioRecording("gesprek");
   });
 
   document.getElementById("write-mode-bar").addEventListener("click", (e) => {
@@ -2625,11 +3759,16 @@ function bindEvents() {
   document.getElementById("btn-reset-progress").addEventListener("click", () => {
     if (!confirm("Weet je zeker dat je alle voortgang wilt wissen?")) return;
     stopWriteTimer();
+    stopSpeakTimer();
+    stopAudioRecording();
     App.progress = defaultProgress();
     App.vocab.session = null;
+    App.speak.monologue = null;
+    App.speak.dialogue = null;
     scheduleSaveProgress();
     renderDashboard();
     if (App.activeTab === "schrijven") renderWritingModule();
+    if (App.activeTab === "spreken") renderSpeakingModule();
     if (App.activeTab === "drill") renderVocabStage();
     showConfigFeedback("Voortgang gewist.");
   });
@@ -2641,6 +3780,7 @@ async function init() {
     await loadInitialData();
     initVocabControls();
     initWritingModule();
+    initSpeakingModule();
     renderDashboard();
   } catch (err) {
     showBanner(`Fout bij opstarten: ${err.message}`, true);

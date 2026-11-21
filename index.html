@@ -125,12 +125,36 @@
       <div id="write-archive"></div>
     </section>
 
-    <!-- TAB 3: SPREKEN & GESPREK (FASE 5) -->
+    <!-- TAB 3: SPREKEN & GESPREK (38%) -->
     <section id="tab-spreken" class="tab-panel">
-      <div class="card empty-module">
-        <h2>Spreken &amp; Gesprek (38%)</h2>
-        <p class="muted">Wordt uitgebouwd in <strong>Fase 5</strong>: Monoloog (8%) en interactief Examengesprek (30%, 15 min voorbereiding + 10 min dialoog) met 3-traps spraakoplossing (Web Speech API, audio-opname naar Gemini met uitspraakfeedback, en chat-fallback).</p>
+      <div class="card drill-controls">
+        <div class="mode-bar" id="speak-mode-bar" style="border-top:none;padding-top:0;" role="tablist" aria-label="Spreekmodus"></div>
+        <div class="drill-select-row" id="speak-setup-row">
+          <div class="drill-field">
+            <label for="speak-wf-select">Thema (woordveld)</label>
+            <select id="speak-wf-select" class="input"></select>
+          </div>
+          <div class="drill-field">
+            <label for="speak-doel-select">Communicatief doel</label>
+            <select id="speak-doel-select" class="input"></select>
+          </div>
+          <div class="btn-row">
+            <button id="btn-speak-random" class="btn btn-secondary" type="button" title="Kies willekeurig thema en doel">🎲 Willekeurig</button>
+            <button id="btn-speak-generate" class="btn btn-primary" type="button">✨ Genereer opdracht</button>
+          </div>
+        </div>
       </div>
+
+      <div id="speak-error" class="banner error hidden" role="alert"></div>
+      <div id="speak-workspace"></div>
+
+      <div class="section-header">
+        <div>
+          <h2>Spreekarchief</h2>
+          <span class="muted" id="speak-archive-count">Eerdere monologen en gesprekken met transcript en 5-categorieën feedback</span>
+        </div>
+      </div>
+      <div id="speak-archive"></div>
     </section>
 
     <!-- TAB 4: LITERATUURBELEVING (FASE 6) -->
