@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frans 2 — Oefenapp (Examencommissie B1)</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-flag" aria-hidden="true"></span>
+        <div>
+          <h1>Frans 2 <span class="badge-level">B1</span></h1>
+          <p class="brand-sub">2de graad doorstroomfinaliteit · Vlaamse Examencommissie</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <span id="save-status" class="status-chip" title="Opslagstatus">Laden…</span>
+        <button id="btn-settings" class="btn btn-secondary" type="button">
+          <span id="api-dot" class="api-dot" aria-hidden="true"></span>
+          Instellingen
+        </button>
+      </div>
+    </div>
+
+    <nav class="tabbar" aria-label="Hoofdnavigatie">
+      <button class="tab-btn active" data-tab="dashboard" type="button">
+        <span>Voortgang</span>
+      </button>
+      <button class="tab-btn" data-tab="schrijven" type="button">
+        <span>Schrijven</span>
+        <span class="tab-weight">58%</span>
+      </button>
+      <button class="tab-btn" data-tab="spreken" type="button">
+        <span>Spreken &amp; Gesprek</span>
+        <span class="tab-weight">38%</span>
+      </button>
+      <button class="tab-btn" data-tab="literatuur" type="button">
+        <span>Literatuur</span>
+        <span class="tab-weight">4%</span>
+      </button>
+      <button class="tab-btn" data-tab="drill" type="button">
+        <span>Woordenschat &amp; Grammatica</span>
+      </button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <div id="global-banner" class="banner hidden" role="alert"></div>
+
+    <!-- TAB 1: VOORTGANGSDASHBOARD -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="kpi-grid" id="dashboard-kpis"></div>
+
+      <div class="section-header">
+        <h2>Examenonderdelen</h2>
+        <span class="muted">Exacte weging Vlaamse Examencommissie</span>
+      </div>
+      <div class="exam-grid" id="dashboard-exam-cards"></div>
+
+      <div class="section-header">
+        <div>
+          <h2>23 Woordvelden</h2>
+          <span class="muted" id="wf-summary-text"></span>
+        </div>
+        <div class="toolbar">
+          <input id="wf-search" class="input input-sm" type="search" placeholder="Zoek woordveld…" aria-label="Zoek woordveld" />
+          <div class="filter-group" id="wf-filters">
+            <button class="chip active" data-filter="all" type="button">Alle</button>
+            <button class="chip" data-filter="niet_gestart" type="button">Niet gestart</button>
+            <button class="chip" data-filter="oefenen" type="button">Oefenen</button>
+            <button class="chip" data-filter="beheerst" type="button">Beheerst</button>
+          </div>
+        </div>
+      </div>
+      <div class="wf-grid" id="dashboard-wf-grid"></div>
+
+      <div class="section-header">
+        <div>
+          <h2>Grammatica (4 pijlers · 17 onderdelen)</h2>
+          <span class="muted" id="gr-summary-text"></span>
+        </div>
+      </div>
+      <div class="gr-pillars" id="dashboard-gr-pillars"></div>
+
+      <div class="section-header">
+        <h2>Recente AI-evaluaties</h2>
+        <span class="muted">Laatste beoordelingen uit Schrijven, Spreken en Literatuur</span>
+      </div>
+      <div class="card" id="dashboard-history"></div>
+    </section>
+
+    <!-- TAB 2: SCHRIJVEN (FASE 4) -->
+    <section id="tab-schrijven" class="tab-panel">
+      <div class="card empty-module">
+        <h2>Schrijven &amp; Schriftelijke Interactie (58%)</h2>
+        <p class="muted">Wordt uitgebouwd in <strong>Fase 4</strong>: AI-examenopdrachten uit de 6 communicatieve doelen, 45/90 min afteltimer, schrijfveld zonder spellingcontrole, Van Dale &amp; Spelling.nu snelkoppelingen, en beoordeling op alle 7 examencriteria.</p>
+      </div>
+    </section>
+
+    <!-- TAB 3: SPREKEN & GESPREK (FASE 5) -->
+    <section id="tab-spreken" class="tab-panel">
+      <div class="card empty-module">
+        <h2>Spreken &amp; Gesprek (38%)</h2>
+        <p class="muted">Wordt uitgebouwd in <strong>Fase 5</strong>: Monoloog (8%) en interactief Examengesprek (30%, 15 min voorbereiding + 10 min dialoog) met 3-traps spraakoplossing (Web Speech API, audio-opname naar Gemini met uitspraakfeedback, en chat-fallback).</p>
+      </div>
+    </section>
+
+    <!-- TAB 4: LITERATUURBELEVING (FASE 6) -->
+    <section id="tab-literatuur" class="tab-panel">
+      <div class="card empty-module">
+        <h2>Literatuurbeleving (4%)</h2>
+        <p class="muted">Wordt uitgebouwd in <strong>Fase 6</strong>: B1-gedicht of verhaalfragment met 2 persoonlijke reflectievragen over eigen gevoelens en ervaringen, inclusief AI-feedback.</p>
+      </div>
+    </section>
+
+    <!-- TAB 5: WOORDENSCHAT & GRAMMATICA (FASE 3A & 3B) -->
+    <section id="tab-drill" class="tab-panel">
+      <div class="subtab-bar">
+        <button class="subtab-btn active" data-subtab="vocab" type="button">Woordenschat (23 velden · offline)</button>
+        <button class="subtab-btn" data-subtab="grammar" type="button">Grammatica Coach (4 pijlers · hybride AI)</button>
+      </div>
+      <div id="subtab-vocab" class="subtab-panel active">
+        <div class="card empty-module">
+          <h2>Woordenschat Drill (Fase 3A)</h2>
+          <p class="muted">Volgende stap: 100% offline oefenen op alle 23 woordvelden (flitskaarten, contextuele invuloefeningen en zinsbouw-puzzels).</p>
+        </div>
+      </div>
+      <div id="subtab-grammar" class="subtab-panel">
+        <div class="card empty-module">
+          <h2>Grammatica Coach (Fase 3B)</h2>
+          <p class="muted">Daarna: offline basisregels + 6 B1-oefentypes met LLM-validatie (invul, zinstransformatie, foutenjacht, zinnen combineren, micro-vertaling en mini-productie).</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- INSTELLINGEN MODAL -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-backdrop" data-close-modal="true"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 id="settings-title">Instellingen &amp; API</h2>
+        <button class="icon-btn" type="button" data-close-modal="true" aria-label="Sluiten">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="cfg-apikey">Google AI Studio API-key</label>
+          <input id="cfg-apikey" class="input" type="password" autocomplete="off" placeholder="AIza…" />
+          <p class="help-text" id="cfg-key-status">Wordt lokaal bewaard op de server (<code>data/config.json</code>) en nooit terug naar de browser gestuurd.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-model">Gemini-model</label>
+          <input id="cfg-model" class="input" type="text" value="gemini-3.5-flash-lite" />
+          <div class="quick-models">
+            <button type="button" class="chip chip-sm" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite</button>
+            <button type="button" class="chip chip-sm" data-model="gemini-2.5-flash-lite">gemini-2.5-flash-lite</button>
+            <button type="button" class="chip chip-sm" data-model="gemini-2.5-flash">gemini-2.5-flash</button>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="btn-save-config" class="btn btn-primary" type="button">Opslaan</button>
+          <button id="btn-test-api" class="btn btn-secondary" type="button">Test verbinding</button>
+          <button id="btn-clear-key" class="btn btn-ghost-danger" type="button">Sleutel wissen</button>
+        </div>
+        <div id="cfg-feedback" class="inline-feedback hidden"></div>
+
+        <hr class="divider" />
+
+        <div class="form-group">
+          <label>Voortgangsbackup (optioneel)</label>
+          <p class="help-text">Voortgang wordt automatisch op de server bewaard. Gebruik export/import enkel als extra backup of bij verhuis.</p>
+          <div class="btn-row">
+            <button id="btn-export" class="btn btn-secondary btn-sm" type="button">Exporteer JSON</button>
+            <label class="btn btn-secondary btn-sm file-label">
+              Importeer JSON
+              <input id="input-import" type="file" accept="application/json" hidden />
+            </label>
+            <button id="btn-reset-progress" class="btn btn-ghost-danger btn-sm" type="button">Reset voortgang</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
