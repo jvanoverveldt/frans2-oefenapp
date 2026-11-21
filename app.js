@@ -349,6 +349,14 @@ function computeGrMetrics(id) {
   };
 }
 
+function evalSlotCredit(scorePct) {
+  const cat = scoreToCategory(scorePct);
+  if (cat.id === "excellent" || cat.id === "goed") return 1;
+  if (cat.id === "voldoende") return 2 / 3;
+  if (cat.id === "bijna") return 1 / 3;
+  return 0;
+}
+
 function getDomainStats(domain) {
   const list = App.progress.evaluaties.filter((e) => e.domein === domain);
   if (!list.length) {
@@ -360,8 +368,16 @@ function getDomainStats(domain) {
   const last = scores.length ? scores[scores.length - 1] : null;
   const mastered = goodCount >= 3;
   const status = mastered ? "beheerst" : "oefenen";
+
+  // Top-3 hoogst behaalde scores tellen verhoudingsgewijs mee (Goed=1, Voldoende=2/3, Bijna voldoende=1/3, Onvoldoende=0)
+  const top3Credits = [...scores]
+    .sort((a, b) => b - a)
+    .slice(0, 3)
+    .reduce((sum, s) => sum + evalSlotCredit(s), 0);
+  const progressPct = Math.round((top3Credits / 3) * 100);
+
   const masteredPct = mastered ? 100 : 0;
-  const inProgressPct = mastered ? 0 : (goodCount > 0 ? Math.round((goodCount / 3) * 100) : 15);
+  const inProgressPct = mastered ? 0 : Math.min(99, progressPct);
   return { status, count: list.length, goodCount, lastScore: last, avgScore: avg, masteredPct, inProgressPct };
 }
 
@@ -681,7 +697,7 @@ function renderDashboard() {
       <span class="score-badge">${examProg.masteredPct}% beheerst${examProg.inProgressPct ? ` · ${examProg.inProgressPct}% op weg` : ""}</span>
     </div>
     ${renderStackedBar(examProg.masteredPct, examProg.inProgressPct)}
-    ${renderBarLegend(`Beheerst (≥3× Goed): ${examProg.masteredPct}%`, `Op weg (1–2× Goed of gestart): ${examProg.inProgressPct}%`)}
+    ${renderBarLegend(`Beheerst (3× Goed): ${examProg.masteredPct}%`, `Op weg (top-3 scores): ${examProg.inProgressPct}%`)}
   `;
 
   const w = App.curriculum.examen.weging;
