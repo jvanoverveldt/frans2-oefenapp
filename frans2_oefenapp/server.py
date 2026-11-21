@@ -39,6 +39,21 @@ HTTPS_HOSTNAME = ""
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
+    def __init__(self, server_address, handler_class):
+        host, port = server_address
+        if host in ("", "0.0.0.0", "::") and socket.has_ipv6:
+            self.address_family = socket.AF_INET6
+            super().__init__(("::", port), handler_class, bind_and_activate=False)
+            try:
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                self.server_bind()
+                self.server_activate()
+                return
+            except OSError:
+                self.server_close()
+        self.address_family = socket.AF_INET
+        super().__init__((host or "0.0.0.0", port), handler_class)
+
 
 class TLSThreadingHTTPServer(ReusableThreadingHTTPServer):
     def __init__(self, server_address, handler_class, ssl_context):
@@ -297,11 +312,16 @@ class FransHandler(BaseHTTPRequestHandler):
 
 
 def start_optional_https_server():
-    global HTTPS_ACTIVE, HTTPS_HOSTNAME
+    global HTTPS_ACTIVE, HTTPS_HOSTNAME, HTTPS_PORT
     ha_opts = get_ha_options()
     env_enable = os.environ.get("ENABLE_HTTPS")
     enabled = parse_bool(env_enable, False) if env_enable is not None else parse_bool(ha_opts.get("enable_https"), False)
     HTTPS_HOSTNAME = (os.environ.get("HTTPS_HOSTNAME") or ha_opts.get("https_hostname") or "").strip()
+    if ha_opts.get("https_port"):
+        try:
+            HTTPS_PORT = int(ha_opts["https_port"])
+        except (TypeError, ValueError):
+            pass
 
     if not enabled:
         return None

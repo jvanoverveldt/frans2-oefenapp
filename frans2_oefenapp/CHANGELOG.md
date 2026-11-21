@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4
+
+- Overgeschakeld naar `host_network: true` + dual-stack IPv4/IPv6-binding (`::`) zodat zowel `http://homeassistant.local:8099` als `https://homeassistant.local:8443` direct op dezelfde netwerkstack als Home Assistant (`:8123`) werken zonder Docker-bridge proxy.
+- `https_port` (standaard `8443`) direct instelbaar gemaakt onder Configuratie.
+
 ## 1.0.3
 
 - Directe HTTP-poort (`8099/tcp`) nu ook rechtstreeks bereikbaar op het thuisnetwerk zonder Home Assistant-login (`http://homeassistant.local:8099`).
