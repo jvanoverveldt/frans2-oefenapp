@@ -140,7 +140,7 @@ function scheduleSaveProgress() {
 
 /* ---------- Gemini Client (compact, <= 1500 tokens) ---------- */
 
-async function callGemini({ prompt, systemInstruction = "", jsonMode = false, contents = null, maxOutputTokens = 1400 }) {
+async function callGemini({ prompt, systemInstruction = "", jsonMode = false, contents = null, maxOutputTokens = 1400, temperature = 0.55 }) {
   if (!App.serverMode) {
     throw new Error("Start eerst 'python server.py' om Gemini AI-calls te gebruiken.");
   }
@@ -148,7 +148,7 @@ async function callGemini({ prompt, systemInstruction = "", jsonMode = false, co
     model: App.config.model,
     contents: contents || [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.55,
+      temperature,
       maxOutputTokens,
       ...(jsonMode ? { responseMimeType: "application/json" } : {}),
     },
@@ -1776,37 +1776,75 @@ async function generateWritingAssignment() {
   }
 }
 
+const WRITING_CRITERIA_MAX = {
+  taakvoltooiing: 4,
+  woordenschat: 3,
+  grammatica: 4,
+  tekststructuur: 3,
+  register: 2,
+  layout: 2,
+  spelling_uitspraak: 2,
+};
+
 async function evaluateSingleTask(task, text, prevEval = null) {
-  const criteriaLines = App.curriculum.examen.beoordelingscriteria
-    .map((c) => `- ${c.id} (${c.naam}): ${c.rubric}`)
+  const criteriaDefs = App.curriculum.examen.beoordelingscriteria;
+  const criteriaLines = criteriaDefs
+    .map((c) => `- ${c.id} (${c.naam}, max ${WRITING_CRITERIA_MAX[c.id] || 2}): ${c.rubric}`)
     .join("\n");
 
   const prevBlock = prevEval
-    ? `\nDit is een VERBETERPOGING na eerdere feedback (vorige score: ${prevEval.totaalOp20}/20). Eerdere aandachtspunten: ${(prevEval.fouten || []).map((f) => f.citaat).join("; ")}. Beoordeel eerlijk op het nieuwe niveau en benoem kort wat verbeterd is.`
+    ? `\nDit is een VERBETERPOGING na eerdere feedback (vorige score: ${prevEval.totaalOp20}/20). Eerdere aandachtspunten: ${(prevEval.fouten || []).map((f) => f.citaat).join("; ")}. Beoordeel streng op de NIEUWE tekst (ook als die slechter is!) en benoem kort wat beter of slechter is.`
     : "";
 
+  const strictRules = [
+    `STRENGE EXAMENCOMMISSIE-NORM (niveau B1, geen troostpunten; 10/20 = minimum om te slagen voor B1):`,
+    `- Gebruik exact de opgegeven maxima (som = 20) en enkel gehele getallen van 0 t.e.m. max.`,
+    `- taakvoltooiing (/4): straf duidelijk af bij te weinig woorden (<110), ontbrekende vereisten of ontwijkende antwoorden ("je sais pas").`,
+    `- grammatica (/4): max 1/4 bij herhaalde basisfouten (foute vervoegingen zoals 'je boit'/'je prefer', verkeerd woordgeslacht zoals 'la cocktail', stelselmatig weglaten van 'ne' in standaardtaal, of enkel A1/A2-zinnen).`,
+    `- spelling_uitspraak (/2): 2/2 enkel bij max 1-2 lichte foutjes; 1/2 bij meerdere fouten maar verzorgde tekst; 0/2 bij veelvuldige fouten tegen accenten, apostroffen ('cest','jaime','lalcohol'), hoofdletters of basisspelling ('rum','crevete','bizzare').`,
+    `- register (/2): 0/2 als het register botst met de ontvanger (bv. 'Monsieur le Directeur' op een informeel forum, of 'tu' tegen een onbekende ambtenaar).`,
+    `- layout (/2): 0-1/2 als aanspreking, alinea's of afsluitende groet ontbreken of niet passen bij de tekstsoort.`,
+    `- Citaten in "fouten" MOETEN letterlijk gekopieerd zijn uit de tekst van de leerling (verzin geen woorden).`,
+  ].join("\n");
+
   const prompt = [
-    `Beoordeel deze Franse B1-tekst volgens de 7 officiële criteria van de Vlaamse Examencommissie (Frans 2, 2de graad doorstroomfinaliteit).`,
+    `Je bent een strenge, eerlijke examinator van de Vlaamse Examencommissie 'Frans 2' (2de graad doorstroomfinaliteit, niveau B1).`,
     `Opdracht (${task.type}): ${task.titel}\nContext: ${task.context}${task.brontekst ? `\nInkomend bericht: ${task.brontekst}` : ""}\nRegister: ${task.register} · Richtlengte: ${task.richtwoorden} woorden\nVereisten: ${(task.vereisten || []).join(" | ")}`,
     `Tekst van de leerling (${countWords(text)} woorden):\n"""\n${text.trim()}\n"""`,
-    `Beoordelingscriteria (geef alle 7 in het Nederlands):\n${criteriaLines}${prevBlock}`,
+    `Beoordelingscriteria (geef alle 7 in het Nederlands):\n${criteriaLines}\n\n${strictRules}${prevBlock}`,
     `Belangrijk: herschrijf NIET de volledige tekst; geef maximaal 3 tot 5 concrete, belangrijkste fouten/verbeterpunten zodat de leerling ze zelf kan verbeteren.`,
-    `Geef UITSLUITEND geldig JSON terug: {"totaalOp20":14,"scorePct":70,"samenvatting":"2 korte NL zinnen","sterktes":["...","..."],"criteria":[{"id":"taakvoltooiing","naam":"Taakvoltooiing","score":3,"max":4,"feedback":"1 korte concrete NL zin"}],"fouten":[{"citaat":"exact stukje uit leerlingtekst","type":"grammatica|spelling|woordenschat|register|structuur","uitleg":"korte NL uitleg waarom fout","tip":"richtinggevende hint om zelf te verbeteren"}]}`,
+    `Geef UITSLUITEND geldig JSON terug: {"samenvatting":"2 korte NL zinnen","sterktes":["..."],"criteria":[{"id":"taakvoltooiing","naam":"Taakvoltooiing","score":2,"max":4,"feedback":"1 korte concrete NL zin"}],"fouten":[{"citaat":"EXACT stukje uit leerlingtekst","type":"grammatica|spelling|woordenschat|register|structuur","uitleg":"korte NL uitleg waarom fout","tip":"richtinggevende hint om zelf te verbeteren"}]}`,
   ].join("\n\n");
 
-  const res = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1500 });
-  const scorePct = Number.isFinite(Number(res.scorePct))
-    ? Math.max(0, Math.min(100, Math.round(Number(res.scorePct))))
-    : Math.round(((Number(res.totaalOp20) || 0) / 20) * 100);
-  const totaalOp20 = Number.isFinite(Number(res.totaalOp20))
-    ? Number(res.totaalOp20)
-    : Math.round((scorePct / 100) * 20);
+  const res = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1500, temperature: 0.15 });
+  const rawCriteria = Array.isArray(res.criteria) ? res.criteria : [];
+  const byId = new Map(rawCriteria.map((cr) => [String(cr.id || "").toLowerCase(), cr]));
+
+  // Deterministische sommatie over exact de 7 vaste criteria (som maxima = 20)
+  const normalizedCriteria = criteriaDefs.map((def) => {
+    const max = WRITING_CRITERIA_MAX[def.id] || 2;
+    const found = byId.get(def.id) || rawCriteria.find((cr) => String(cr.naam || "").toLowerCase().includes(def.naam.slice(0, 6).toLowerCase()));
+    const rawScore = Number(found?.score);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(max, Math.round(rawScore))) : 0;
+    return {
+      id: def.id,
+      naam: def.naam,
+      score,
+      max,
+      feedback: found?.feedback || "",
+    };
+  });
+
+  const maxTotal = normalizedCriteria.reduce((s, cr) => s + cr.max, 0);
+  const totaalOp20 = normalizedCriteria.reduce((s, cr) => s + cr.score, 0);
+  const scorePct = Math.round((totaalOp20 / Math.max(1, maxTotal)) * 100);
+
   return {
     totaalOp20,
     scorePct,
     samenvatting: res.samenvatting || "",
     sterktes: Array.isArray(res.sterktes) ? res.sterktes : [],
-    criteria: Array.isArray(res.criteria) ? res.criteria : [],
+    criteria: normalizedCriteria,
     fouten: Array.isArray(res.fouten) ? res.fouten : [],
   };
 }
