@@ -17,6 +17,7 @@ const App = {
   wfSearch: "",
   saveTimer: null,
   vocab: {
+    view: "overview", // "overview" | "practice"
     scope: "wf01",
     group: "__all",
     mode: "toets",
@@ -64,9 +65,11 @@ const App = {
     openArchiveId: null,
   },
   grammar: {
+    view: "overview", // "overview" | "practice"
     pillar: "__all",
     topicId: "gr01",
-    mode: "ai_coach", // "ai_coach" | "basis" | "theorie" | "leerkracht"
+    mode: "ai_coach", // "ai_coach" | "basis" | "leerkracht"
+    ruleCollapsed: false,
     exerciseType: "mix",
     count: 5,
     loading: false,
@@ -349,32 +352,56 @@ function computeGrMetrics(id) {
 function getDomainStats(domain) {
   const list = App.progress.evaluaties.filter((e) => e.domein === domain);
   if (!list.length) {
-    return { status: "niet_gestart", count: 0, lastScore: null, avgScore: null };
+    return { status: "niet_gestart", count: 0, goodCount: 0, lastScore: null, avgScore: null, masteredPct: 0, inProgressPct: 0 };
   }
   const scores = list.map((e) => Number(e.scorePct)).filter((n) => Number.isFinite(n));
+  const goodCount = scores.filter((s) => s >= 70).length; // minstens 'Goed' (>= 70%)
   const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
   const last = scores.length ? scores[scores.length - 1] : null;
-  const status = avg !== null && avg >= 75 && scores.length >= 2 ? "beheerst" : "oefenen";
-  return { status, count: list.length, lastScore: last, avgScore: avg };
+  const mastered = goodCount >= 3;
+  const status = mastered ? "beheerst" : "oefenen";
+  const masteredPct = mastered ? 100 : 0;
+  const inProgressPct = mastered ? 0 : (goodCount > 0 ? Math.round((goodCount / 3) * 100) : 15);
+  return { status, count: list.length, goodCount, lastScore: last, avgScore: avg, masteredPct, inProgressPct };
 }
 
-function computeWeightedReadiness() {
+function computeExamWeightedProgress() {
   const w = App.curriculum.examen.weging;
   const parts = [
-    { weight: w.schrijven, stats: getDomainStats("schrijven") },
-    { weight: w.monoloog, stats: getDomainStats("monoloog") },
-    { weight: w.gesprek, stats: getDomainStats("gesprek") },
-    { weight: w.literatuurbeleving, stats: getDomainStats("literatuur") },
+    { key: "schrijven", weight: w.schrijven, stats: getDomainStats("schrijven") },
+    { key: "gesprek", weight: w.gesprek, stats: getDomainStats("gesprek") },
+    { key: "monoloog", weight: w.monoloog, stats: getDomainStats("monoloog") },
   ];
-  let weightedSum = 0;
-  let coveredWeight = 0;
+  const totalWeight = parts.reduce((s, p) => s + p.weight, 0); // 58 + 30 + 8 = 96
+  let masteredW = 0;
+  let progressW = 0;
   for (const p of parts) {
-    if (p.stats.avgScore !== null) {
-      weightedSum += (p.stats.avgScore * p.weight) / 100;
-      coveredWeight += p.weight;
-    }
+    masteredW += (p.weight * p.stats.masteredPct) / 100;
+    progressW += (p.weight * p.stats.inProgressPct) / 100;
   }
-  return { totalPct: Math.round(weightedSum), coveredWeight };
+  const masteredPct = Math.round((masteredW / totalWeight) * 100);
+  const inProgressPct = Math.min(100 - masteredPct, Math.round((progressW / totalWeight) * 100));
+  return { masteredPct, inProgressPct, totalWeight, parts };
+}
+
+function renderStackedBar(masteredPct, inProgressPct, compact = false) {
+  const m = Math.max(0, Math.min(100, Math.round(masteredPct)));
+  const p = Math.max(0, Math.min(100 - m, Math.round(inProgressPct)));
+  return `
+    <div class="stacked-bar${compact ? " compact" : ""}" role="progressbar" aria-valuenow="${m}" aria-valuemin="0" aria-valuemax="100" title="Beheerst: ${m}% · Op weg: ${p}%">
+      <div class="seg-mastered" style="width:${m}%"></div>
+      <div class="seg-progress" style="width:${p}%"></div>
+    </div>
+  `;
+}
+
+function renderBarLegend(masteredLabel, progressLabel) {
+  return `
+    <div class="bar-legend">
+      <span><span class="legend-dot mastered"></span>${escapeHtml(masteredLabel)}</span>
+      <span><span class="legend-dot progress"></span>${escapeHtml(progressLabel)}</span>
+    </div>
+  `;
 }
 
 /* ---------- Shared Drill & French Utilities ---------- */
@@ -579,7 +606,7 @@ function renderPrevFeedbackBar(fb) {
 
 /* ---------- Navigation ---------- */
 
-function switchTab(tabId, subtabId = null) {
+function switchTab(tabId) {
   App.activeTab = tabId;
   document.querySelectorAll(".tab-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.tab === tabId);
@@ -587,25 +614,14 @@ function switchTab(tabId, subtabId = null) {
   document.querySelectorAll(".tab-panel").forEach((p) => {
     p.classList.toggle("active", p.id === `tab-${tabId}`);
   });
-  if (subtabId) switchSubtab(subtabId);
   if (tabId === "dashboard") renderDashboard();
+  if (tabId === "vocab") renderVocabTab();
+  if (tabId === "grammar") renderGrammarTab();
   if (tabId === "schrijven") renderWritingModule();
   if (tabId === "spreken") renderSpeakingModule();
-  if (tabId === "drill") renderVocabStage();
 }
 
-function switchSubtab(subtabId) {
-  document.querySelectorAll(".subtab-btn").forEach((b) => {
-    b.classList.toggle("active", b.dataset.subtab === subtabId);
-  });
-  document.querySelectorAll(".subtab-panel").forEach((p) => {
-    p.classList.toggle("active", p.id === `subtab-${subtabId}`);
-  });
-  if (subtabId === "vocab") renderVocabStage();
-  if (subtabId === "grammar") renderGrammarStage();
-}
-
-/* ---------- Tab 1: Dashboard (100% automatisch berekend) ---------- */
+/* ---------- Tab 1: Overzicht (enkel hoofdonderdelen) ---------- */
 
 function renderDashboard() {
   if (!App.curriculum || !App.progress) return;
@@ -614,67 +630,72 @@ function renderDashboard() {
 
   const wfStats = wfList.map((wf) => ({ wf, m: computeWfMetrics(wf) }));
   const wfMastered = wfStats.filter((x) => x.m.status === "beheerst").length;
-  const wfPracticing = wfStats.filter((x) => x.m.status === "oefenen").length;
   const totalWords = wfStats.reduce((s, x) => s + x.m.total, 0);
   const totalWordsMastered = wfStats.reduce((s, x) => s + x.m.mastered, 0);
   const totalWordsInProgress = wfStats.reduce((s, x) => s + x.m.inProgress, 0);
   const totalWordsDue = wfStats.reduce((s, x) => s + x.m.due, 0);
+  const wfBarMastered = Math.round((totalWordsMastered / Math.max(1, totalWords)) * 100);
+  const wfBarProgress = Math.round((totalWordsInProgress / Math.max(1, totalWords)) * 100);
 
-  const grMastered = grAll.filter((g) => computeGrMetrics(g.id).status === "beheerst").length;
-  const grPracticing = grAll.filter((g) => computeGrMetrics(g.id).status === "oefenen").length;
-  const readiness = computeWeightedReadiness();
+  const grStats = grAll.map((g) => computeGrMetrics(g.id));
+  const grMastered = grStats.filter((m) => m.status === "beheerst").length;
+  const grPracticing = grStats.filter((m) => m.status === "oefenen").length;
+  const grBarMastered = Math.round((grMastered / Math.max(1, grAll.length)) * 100);
+  const grBarProgress = Math.round((grPracticing / Math.max(1, grAll.length)) * 100);
 
-  const nextTip = totalWordsDue > 0
-    ? `${totalWordsDue} woord(en) staan klaar voor gespreide herhaling.`
-    : !App.config.hasKey
-      ? "Stel je Gemini API-key in bij Instellingen voor AI-zinnen en examenevaluatie."
-      : totalWordsMastered < 50
-        ? "Start een reeks Woordentoets (NL → FR) om je woordenschat actief in te prenten."
-        : "Wissel woordenschat af met schrijven, spreken en grammatica.";
+  document.getElementById("dashboard-base-cards").innerHTML = `
+    <div class="exam-card">
+      <div class="exam-card-top">
+        <h3>Woordenschat (23 woordvelden)</h3>
+        <span class="weight-pill">${totalWords} woorden</span>
+      </div>
+      ${renderStackedBar(wfBarMastered, wfBarProgress)}
+      ${renderBarLegend(`Beheerst: ${totalWordsMastered} (${wfMastered}/23 velden)`, `Op weg: ${totalWordsInProgress}`)}
+      <div class="exam-footer">
+        <span class="muted">${totalWordsDue > 0 ? `↻ ${totalWordsDue} klaar voor herhaling` : "3× foutloos NL → FR = Beheerst"}</span>
+        <button class="btn btn-primary btn-sm" type="button" data-goto-tab="vocab">Naar Woordenschat →</button>
+      </div>
+    </div>
+    <div class="exam-card">
+      <div class="exam-card-top">
+        <h3>Grammatica (4 pijlers)</h3>
+        <span class="weight-pill">${grAll.length} onderdelen</span>
+      </div>
+      ${renderStackedBar(grBarMastered, grBarProgress)}
+      ${renderBarLegend(`Beheerst: ${grMastered}/${grAll.length}`, `Op weg: ${grPracticing}/${grAll.length}`)}
+      <div class="exam-footer">
+        <span class="muted">2 dagen niveau Goed = Beheerst</span>
+        <button class="btn btn-primary btn-sm" type="button" data-goto-tab="grammar">Naar Grammatica →</button>
+      </div>
+    </div>
+  `;
 
-  const readinessLabel = readiness.coveredWeight > 0
-    ? scoreToCategory(Math.round((readiness.totalPct / readiness.coveredWeight) * 100)).label
-    : "Nog niet gestart";
-
-  document.getElementById("dashboard-kpis").innerHTML = `
-    <div class="kpi-card">
-      <div class="kpi-label">Examenniveau (geoefende delen)</div>
-      <div class="kpi-value" style="font-size:1.35rem;">${escapeHtml(readinessLabel)}</div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${readiness.coveredWeight}%"></div></div>
-      <div class="kpi-sub">${readiness.coveredWeight}% van de examenweging geoefend</div>
+  // Gewogen algemene examenbalk (Schrijven 58% + Gesprek 30% + Monoloog 8%)
+  const examProg = computeExamWeightedProgress();
+  document.getElementById("dashboard-exam-overall").innerHTML = `
+    <div class="stage-toolbar" style="margin-bottom:0.35rem;">
+      <div>
+        <strong>Algemene examenvoorbereiding</strong>
+        <span class="muted"> (gewogen: Schrijven 58% · Gesprek 30% · Monoloog 8%)</span>
+      </div>
+      <span class="score-badge">${examProg.masteredPct}% beheerst${examProg.inProgressPct ? ` · ${examProg.inProgressPct}% op weg` : ""}</span>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Woordenschat (${totalWords} woorden)</div>
-      <div class="kpi-value">${totalWordsMastered} / ${totalWords}</div>
-      <div class="progress-bar"><div class="progress-fill ok" style="width:${Math.round((totalWordsMastered / Math.max(1, totalWords)) * 100)}%"></div></div>
-      <div class="kpi-sub">${totalWordsInProgress} op weg · ${totalWordsDue} te herhalen · ${wfMastered}/23 velden klaar</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Grammatica (4 pijlers)</div>
-      <div class="kpi-value">${grMastered} / ${grAll.length}</div>
-      <div class="progress-bar"><div class="progress-fill ok" style="width:${Math.round((grMastered / grAll.length) * 100)}%"></div></div>
-      <div class="kpi-sub">${grPracticing} bezig met oefenen · ${grAll.length - grMastered - grPracticing} niet gestart</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Aanbevolen volgende stap</div>
-      <div class="kpi-value" style="font-size:1rem;line-height:1.35;margin-top:0.45rem;">${escapeHtml(nextTip)}</div>
-      <div class="kpi-sub">Beheerst = 3× foutloos NL → FR verspreid over dagen</div>
-    </div>
+    ${renderStackedBar(examProg.masteredPct, examProg.inProgressPct)}
+    ${renderBarLegend(`Beheerst (≥3× Goed): ${examProg.masteredPct}%`, `Op weg (1–2× Goed of gestart): ${examProg.inProgressPct}%`)}
   `;
 
   const w = App.curriculum.examen.weging;
   const domains = [
     { key: "schrijven", title: "Schrijven & Interactie", weight: `${w.schrijven}%`, desc: "29% schrijven + 29% schriftelijke interactie · 90 min (2 opdrachten)", tab: "schrijven" },
-    { key: "monoloog", title: "Spreken — Monoloog", weight: `${w.monoloog}%`, desc: "Thuisopdracht · voorbereiding + Franse monoloog", tab: "spreken" },
-    { key: "gesprek", title: "Mondeling Gesprek", weight: `${w.gesprek}%`, desc: "15 min voorbereiding (kladblad) + 10 min examengesprek", tab: "spreken" },
-    { key: "literatuur", title: "Literatuurbeleving", weight: `${w.literatuurbeleving}%`, desc: "Eigen ervaring en gevoelens verwoorden bij B1-tekst", tab: "literatuur" },
+    { key: "gesprek", title: "Mondeling Gesprek", weight: `${w.gesprek}%`, desc: "15 min voorbereiding (kladblad) + 10 min examengesprek", tab: "spreken", speakMode: "gesprek_oefen" },
+    { key: "monoloog", title: "Spreken — Monoloog", weight: `${w.monoloog}%`, desc: "Thuisopdracht · voorbereiding + Franse monoloog", tab: "spreken", speakMode: "monoloog" },
   ];
 
   document.getElementById("dashboard-exam-cards").innerHTML = domains.map((d) => {
     const st = getDomainStats(d.key);
     const scoreLine = st.count
-      ? `Laatste: <strong>${scoreToCategory(st.lastScore).label}</strong> · Gem.: <strong>${scoreToCategory(st.avgScore).label}</strong> (${st.count}×)`
-      : "Nog geen evaluaties";
+      ? `Laatste: <strong>${scoreToCategory(st.lastScore).label}</strong> · Gem.: <strong>${scoreToCategory(st.avgScore).label}</strong> (${st.count}× geoefend)`
+      : "Nog niet geoefend";
     return `
       <div class="exam-card">
         <div class="exam-card-top">
@@ -682,72 +703,15 @@ function renderDashboard() {
           <span class="weight-pill">${d.weight}</span>
         </div>
         <div class="exam-meta">${d.desc}</div>
-        <div class="exam-meta">${scoreLine}</div>
+        ${renderStackedBar(st.masteredPct, st.inProgressPct, true)}
+        <div class="wf-progress-meta">
+          <span><strong>${Math.min(3, st.goodCount)} / 3</strong> keer niveau Goed</span>
+          <span>${scoreLine}</span>
+        </div>
         <div class="exam-footer">
           <span class="status-pill status-${st.status}">${STATUS_LABELS[st.status]}</span>
-          <button class="btn btn-secondary btn-sm" type="button" data-goto-tab="${d.tab}">Oefen →</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-goto-tab="${d.tab}" ${d.speakMode ? `data-goto-speak-mode="${d.speakMode}"` : ""}>Oefen →</button>
         </div>
-      </div>
-    `;
-  }).join("");
-
-  document.getElementById("wf-summary-text").textContent =
-    `${wfMastered} beheerst · ${wfPracticing} aan het oefenen · ${totalWords} woorden (beheerst bij ≥80% op niveau 3/3)`;
-
-  const q = App.wfSearch.trim().toLowerCase();
-  const filteredWf = wfStats.filter(({ wf, m }) => {
-    if (App.wfFilter !== "all" && m.status !== App.wfFilter) return false;
-    if (q && !wf.titel_nl.toLowerCase().includes(q) && !wf.titel_fr.toLowerCase().includes(q)) return false;
-    return true;
-  });
-
-  document.getElementById("dashboard-wf-grid").innerHTML = filteredWf.length
-    ? filteredWf.map(({ wf, m }) => `
-        <div class="wf-card">
-          <div class="wf-head">
-            <span class="wf-num">${String(wf.nummer).padStart(2, "0")}</span>
-            <span class="wf-title">${escapeHtml(wf.titel_nl)}</span>
-          </div>
-          <div class="wf-fr">${escapeHtml(wf.titel_fr)}</div>
-          <div class="progress-bar" style="margin:0.15rem 0;"><div class="progress-fill ok" style="width:${m.masteredPct}%"></div></div>
-          <div class="wf-progress-meta">
-            <span>${m.mastered} / ${m.total} beheerst${m.inProgress ? ` (+${m.inProgress} op weg)` : ""}${m.accuracy !== null ? ` · ${m.accuracy}%` : ""}</span>
-            ${m.due > 0 ? `<span class="due-badge">↻ ${m.due}</span>` : ""}
-          </div>
-          <div class="wf-actions">
-            <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
-            <button class="btn btn-secondary btn-sm" type="button" data-open-wf="${wf.id}">Oefen</button>
-          </div>
-        </div>
-      `).join("")
-    : `<div class="card muted">Geen woordvelden gevonden voor deze filter.</div>`;
-
-  document.getElementById("gr-summary-text").textContent =
-    `${grMastered} van ${grAll.length} onderdelen beheerst (2 dagen op niveau Goed of hoger)`;
-
-  document.getElementById("dashboard-gr-pillars").innerHTML = App.curriculum.grammatica.map((p) => {
-    const doneCount = p.onderdelen.filter((o) => computeGrMetrics(o.id).status === "beheerst").length;
-    const items = p.onderdelen.map((o) => {
-      const m = computeGrMetrics(o.id);
-      const badgeHtml = m.score !== null ? renderCategoryBadge(m.score) : `<span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>`;
-      const daysHint = m.status === "oefenen" && m.goodDaysCount === 1 ? `<span class="muted" style="font-size:0.75rem;">1/2 dagen Goed</span>` : "";
-      return `
-        <li class="gr-item">
-          <div class="gr-item-name">${escapeHtml(o.naam)}</div>
-          <div class="gr-item-bar">
-            <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">${badgeHtml}${daysHint}</div>
-            <button class="btn btn-secondary btn-sm" type="button" data-open-gr="${o.id}">Oefen</button>
-          </div>
-        </li>
-      `;
-    }).join("");
-    return `
-      <div class="gr-pillar">
-        <h3>
-          <span>${escapeHtml(p.titel)}</span>
-          <span class="muted">${doneCount}/${p.onderdelen.length}</span>
-        </h3>
-        <ul class="gr-list">${items}</ul>
       </div>
     `;
   }).join("");
@@ -755,7 +719,7 @@ function renderDashboard() {
   const historyEl = document.getElementById("dashboard-history");
   const recent = [...App.progress.evaluaties].reverse().slice(0, 8);
   if (!recent.length) {
-    historyEl.innerHTML = `<p class="muted" style="margin:0;">Nog geen AI-evaluaties opgeslagen. Zodra je schrijf-, spreek- of literatuuropdrachten maakt, verschijnen je evaluaties hier automatisch.</p>`;
+    historyEl.innerHTML = `<p class="muted" style="margin:0;">Nog geen AI-evaluaties opgeslagen. Zodra je schrijf- of spreekopdrachten maakt, verschijnen je evaluaties hier automatisch.</p>`;
   } else {
     historyEl.innerHTML = `<div class="history-list">${recent.map((e) => {
       const catBadge = e.poging2
@@ -936,16 +900,96 @@ function renderVocabMeta() {
   `;
 }
 
+function renderVocabOverview() {
+  const wfList = App.curriculum.woordvelden;
+  const wfStats = wfList.map((wf) => ({ wf, m: computeWfMetrics(wf) }));
+  const totalWords = wfStats.reduce((s, x) => s + x.m.total, 0);
+  const totalMastered = wfStats.reduce((s, x) => s + x.m.mastered, 0);
+  const totalInProgress = wfStats.reduce((s, x) => s + x.m.inProgress, 0);
+  const totalDue = wfStats.reduce((s, x) => s + x.m.due, 0);
+  const fieldsMastered = wfStats.filter((x) => x.m.status === "beheerst").length;
+  const mPct = Math.round((totalMastered / Math.max(1, totalWords)) * 100);
+  const pPct = Math.round((totalInProgress / Math.max(1, totalWords)) * 100);
+
+  document.getElementById("vocab-overall-card").innerHTML = `
+    <div class="stage-toolbar" style="margin-bottom:0.35rem;">
+      <div>
+        <strong>Algemene voortgang Woordenschat</strong>
+        <span class="muted"> · ${totalMastered} / ${totalWords} woorden beheerst (${fieldsMastered}/23 woordvelden)</span>
+      </div>
+      <div class="btn-row">
+        ${totalDue > 0 ? `<button type="button" class="btn btn-primary btn-sm" data-open-wf="__mix_due">↻ Herhaal vervallen (${totalDue})</button>` : ""}
+        <button type="button" class="btn btn-secondary btn-sm" data-open-wf="__mix_all">Mix · Alle 23 velden</button>
+      </div>
+    </div>
+    ${renderStackedBar(mPct, pPct)}
+    ${renderBarLegend(`Beheerst (3× foutloos): ${totalMastered}`, `Op weg (1–2× foutloos): ${totalInProgress}`)}
+  `;
+
+  document.getElementById("vocab-list-summary").textContent =
+    `${fieldsMastered} beheerst · ${wfStats.filter((x) => x.m.status === "oefenen").length} bezig · klik op Oefen om te starten`;
+
+  const q = App.wfSearch.trim().toLowerCase();
+  const filtered = wfStats.filter(({ wf, m }) => {
+    if (App.wfFilter !== "all" && m.status !== App.wfFilter) return false;
+    if (q && !wf.titel_nl.toLowerCase().includes(q) && !wf.titel_fr.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  document.getElementById("vocab-wf-list").innerHTML = filtered.length
+    ? filtered.map(({ wf, m }) => {
+        const rowMPct = Math.round((m.mastered / Math.max(1, m.total)) * 100);
+        const rowPPct = Math.round((m.inProgress / Math.max(1, m.total)) * 100);
+        return `
+          <div class="list-row">
+            <div class="list-row-main">
+              <span class="wf-num">${String(wf.nummer).padStart(2, "0")}</span>
+              <div class="list-row-titles">
+                <div class="list-row-title">${escapeHtml(wf.titel_nl)}</div>
+                <div class="list-row-sub">${escapeHtml(wf.titel_fr)}</div>
+              </div>
+            </div>
+            <div class="list-row-bar">
+              ${renderStackedBar(rowMPct, rowPPct, true)}
+              <div class="list-row-bar-meta">
+                <span>${m.mastered}/${m.total} beheerst${m.inProgress ? ` · +${m.inProgress} op weg` : ""}</span>
+                ${m.due > 0 ? `<span class="due-badge">↻ ${m.due}</span>` : ""}
+              </div>
+            </div>
+            <div class="list-row-actions">
+              <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
+              <button class="btn btn-primary btn-sm" type="button" data-open-wf="${wf.id}">Oefen</button>
+            </div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="card muted">Geen woordvelden gevonden voor deze filter.</div>`;
+}
+
+function renderVocabTab() {
+  if (!App.curriculum) return;
+  const ov = document.getElementById("vocab-overview-view");
+  const pr = document.getElementById("vocab-practice-view");
+  const isPractice = App.vocab.view === "practice";
+  ov.classList.toggle("hidden", isPractice);
+  pr.classList.toggle("hidden", !isPractice);
+  if (isPractice) {
+    renderVocabStage();
+  } else {
+    renderVocabOverview();
+  }
+}
+
 function openVocabField(wfId) {
   App.vocab.scope = wfId;
   App.vocab.group = "__all";
+  App.vocab.view = "practice";
   App.vocab.session = null;
   App.vocab.aiError = "";
   const select = document.getElementById("vocab-wf-select");
   if (select) select.value = wfId;
   populateVocabGroups();
-  switchTab("drill", "vocab");
-  renderVocabMeta();
+  switchTab("vocab");
 }
 
 function setVocabMode(modeId) {
@@ -3520,7 +3564,6 @@ const GRAMMAR_EXERCISE_TYPES = [
 const GRAMMAR_MODES = [
   { id: "ai_coach", label: "AI Grammatica-coach", render: renderGrammarAiCoach },
   { id: "basis", label: "Snelle offline dril (0 API)", render: renderGrammarOffline },
-  { id: "theorie", label: "Regelkaart & voorbeelden", render: renderGrammarTheory },
   { id: "leerkracht", label: "Leerkracht-paneel (eigen oefeningen)", render: renderGrammarTeacherPanel },
 ];
 
@@ -3569,11 +3612,6 @@ function showGrammarError(msg) {
 }
 
 function initGrammarModule() {
-  const pSel = document.getElementById("gr-pillar-select");
-  pSel.innerHTML = `<option value="__all">Alle 4 pijlers (17)</option>` +
-    App.curriculum.grammatica.map((p) => `<option value="${p.pijler}">${escapeHtml(p.titel)} (${p.onderdelen.length})</option>`).join("");
-  pSel.value = App.grammar.pillar;
-
   populateGrammarTopics();
   renderGrammarModeBar();
   renderGrammarMeta();
@@ -3581,16 +3619,15 @@ function initGrammarModule() {
 
 function populateGrammarTopics() {
   const tSel = document.getElementById("gr-topic-select");
-  const all = getAllGrammarTopics();
-  const filtered = App.grammar.pillar === "__all" ? all : all.filter((t) => t.pijler === App.grammar.pillar);
-  tSel.innerHTML = filtered.map((t) => {
-    const customCount = getCustomGrammarBucket(t.id).exercises.length;
-    const tag = customCount ? ` · +${customCount} leerkracht` : "";
-    return `<option value="${t.id}">${escapeHtml(t.naam)}${tag}</option>`;
+  if (!tSel) return;
+  tSel.innerHTML = App.curriculum.grammatica.map((p) => {
+    const opts = p.onderdelen.map((t) => {
+      const customCount = getCustomGrammarBucket(t.id).exercises.length;
+      const tag = customCount ? ` · +${customCount} leerkracht` : "";
+      return `<option value="${t.id}">${escapeHtml(t.naam)}${tag}</option>`;
+    }).join("");
+    return `<optgroup label="${escapeHtml(p.titel)}">${opts}</optgroup>`;
   }).join("");
-  if (!filtered.some((t) => t.id === App.grammar.topicId)) {
-    App.grammar.topicId = filtered[0]?.id || "gr01";
-  }
   tSel.value = App.grammar.topicId;
 }
 
@@ -3615,16 +3652,135 @@ function renderGrammarMeta() {
   `;
 }
 
+function renderGrammarRuleCard() {
+  const card = document.getElementById("gr-rule-card");
+  if (!card) return;
+  const topic = getCurrentGrammarTopic();
+  const custom = getCustomGrammarBucket(topic.id);
+  const collapsed = App.grammar.ruleCollapsed;
+
+  card.innerHTML = `
+    <div class="rule-always-head">
+      <div>
+        <span class="weight-pill">${escapeHtml(topic.pijlerTitel)}</span>
+        <strong style="margin-left:0.45rem;font-size:1rem;">${escapeHtml(topic.naam)}</strong>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-gr-toggle-rule="1">
+        ${collapsed ? "Toon regel & voorbeelden" : "Verberg regel"}
+      </button>
+    </div>
+    ${!collapsed ? `
+      <p style="margin:0.65rem 0 0;font-size:0.94rem;line-height:1.6;">${escapeHtml(topic.uitleg)}</p>
+      ${custom.focus ? `<div class="teacher-focus-banner" style="margin:0.65rem 0 0;"><strong>👩‍🏫 Focus van de leerkracht:</strong> ${escapeHtml(custom.focus)}</div>` : ""}
+      <div class="rule-examples-inline">
+        ${topic.voorbeelden.map((v) => `
+          <div class="example-item">
+            <div>
+              <div><strong>${escapeHtml(v.fr)}</strong></div>
+              <div class="muted" style="font-size:0.84rem;">${escapeHtml(v.nl)}</div>
+            </div>
+            <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(v.fr)}" title="Luister zin">🔊</button>
+          </div>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function renderGrammarOverview() {
+  const grAll = getAllGrammarTopics();
+  const grMetrics = grAll.map((t) => ({ t, m: computeGrMetrics(t.id) }));
+  const masteredCnt = grMetrics.filter((x) => x.m.status === "beheerst").length;
+  const practicingCnt = grMetrics.filter((x) => x.m.status === "oefenen").length;
+  const mPct = Math.round((masteredCnt / Math.max(1, grAll.length)) * 100);
+  const pPct = Math.round((practicingCnt / Math.max(1, grAll.length)) * 100);
+
+  document.getElementById("gr-overall-card").innerHTML = `
+    <div class="stage-toolbar" style="margin-bottom:0.35rem;">
+      <div>
+        <strong>Algemene voortgang Grammatica</strong>
+        <span class="muted"> · ${masteredCnt} / ${grAll.length} onderdelen beheerst (2 dagen niveau Goed)</span>
+      </div>
+    </div>
+    ${renderStackedBar(mPct, pPct)}
+    ${renderBarLegend(`Beheerst (2/2 dagen Goed): ${masteredCnt}`, `Op weg: ${practicingCnt}`)}
+  `;
+
+  document.getElementById("gr-list-summary").textContent =
+    `${masteredCnt} beheerst · ${practicingCnt} bezig · kies een onderdeel om de regel te zien en te oefenen`;
+
+  const pf = document.getElementById("gr-pillar-filters");
+  pf.innerHTML = `<button type="button" class="chip${App.grammar.pillar === "__all" ? " active" : ""}" data-gr-pillar="__all">Alle (${grAll.length})</button>` +
+    App.curriculum.grammatica.map((p) =>
+      `<button type="button" class="chip${App.grammar.pillar === p.pijler ? " active" : ""}" data-gr-pillar="${p.pijler}">${escapeHtml(p.titel)}</button>`
+    ).join("");
+
+  const pillars = App.grammar.pillar === "__all"
+    ? App.curriculum.grammatica
+    : App.curriculum.grammatica.filter((p) => p.pijler === App.grammar.pillar);
+
+  document.getElementById("gr-topic-list").innerHTML = pillars.map((p) => {
+    const done = p.onderdelen.filter((o) => computeGrMetrics(o.id).status === "beheerst").length;
+    const rows = p.onderdelen.map((o) => {
+      const m = computeGrMetrics(o.id);
+      const customCnt = getCustomGrammarBucket(o.id).exercises.length;
+      const rowM = m.status === "beheerst" ? 100 : 0;
+      const rowP = m.status === "beheerst" ? 0 : (m.goodDaysCount === 1 ? 50 : m.attempts > 0 ? 20 : 0);
+      return `
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-titles">
+              <div class="list-row-title">${escapeHtml(o.naam)}</div>
+              ${customCnt ? `<div class="list-row-sub">👩‍🏫 ${customCnt} eigen leerkracht-oefening(en)</div>` : ""}
+            </div>
+          </div>
+          <div class="list-row-bar">
+            ${renderStackedBar(rowM, rowP, true)}
+            <div class="list-row-bar-meta">
+              <span>${m.goodDaysCount}/2 dagen Goed</span>
+              ${m.weakPoints.length ? `<span>${m.weakPoints.length} aandachtspunt(en)</span>` : ""}
+            </div>
+          </div>
+          <div class="list-row-actions">
+            ${m.score !== null ? renderCategoryBadge(m.score) : `<span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>`}
+            <button class="btn btn-primary btn-sm" type="button" data-open-gr="${o.id}">Oefen</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="list-group-title">
+        <span>${escapeHtml(p.titel)}</span>
+        <span class="muted">${done}/${p.onderdelen.length} beheerst</span>
+      </div>
+      <div class="compact-list">${rows}</div>
+    `;
+  }).join("");
+}
+
+function renderGrammarTab() {
+  if (!App.curriculum) return;
+  const ov = document.getElementById("gr-overview-view");
+  const pr = document.getElementById("gr-practice-view");
+  const isPractice = App.grammar.view === "practice";
+  ov.classList.toggle("hidden", isPractice);
+  pr.classList.toggle("hidden", !isPractice);
+  if (isPractice) {
+    renderGrammarStage();
+  } else {
+    renderGrammarOverview();
+  }
+}
+
 function openGrammarTopic(topicId) {
-  App.grammar.pillar = "__all";
   App.grammar.topicId = topicId;
+  App.grammar.view = "practice";
+  App.grammar.ruleCollapsed = false;
   App.grammar.session = null;
   App.grammar.offlineSession = null;
   showGrammarError("");
-  const pSel = document.getElementById("gr-pillar-select");
-  if (pSel) pSel.value = "__all";
   populateGrammarTopics();
-  switchTab("drill", "grammar");
+  switchTab("grammar");
 }
 
 function setGrammarMode(modeId) {
@@ -3638,6 +3794,7 @@ function renderGrammarStage() {
   if (!App.curriculum) return;
   renderGrammarModeBar();
   renderGrammarMeta();
+  renderGrammarRuleCard();
   renderGrammarArchive();
   const mode = GRAMMAR_MODES.find((m) => m.id === App.grammar.mode) || GRAMMAR_MODES[0];
   mode.render(document.getElementById("gr-stage"));
@@ -3915,12 +4072,7 @@ function renderGrammarAiCoach(container) {
   }
 
   if (!s) {
-    container.innerHTML = `${setupCard}
-      <div class="card empty-module">
-        <h3>${escapeHtml(topic.naam)}</h3>
-        <p class="muted" style="max-width:650px;margin:0.4rem auto 0;">${escapeHtml(topic.uitleg)}</p>
-      </div>
-    `;
+    container.innerHTML = `${setupCard}`;
     return;
   }
 
@@ -4453,7 +4605,8 @@ async function importProgressJson(file) {
     App.vocab.session = null;
     scheduleSaveProgress();
     renderDashboard();
-    if (App.activeTab === "drill") renderVocabStage();
+    if (App.activeTab === "vocab") renderVocabTab();
+    if (App.activeTab === "grammar") renderGrammarTab();
     showConfigFeedback("Voortgang succesvol geïmporteerd en opgeslagen.");
   } catch {
     showConfigFeedback("Ongeldig JSON-bestand.", true);
@@ -4464,11 +4617,15 @@ async function importProgressJson(file) {
 
 function bindEvents() {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-  });
-
-  document.querySelectorAll(".subtab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchSubtab(btn.dataset.subtab));
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.tab;
+      if (target === "vocab" && App.activeTab === "vocab") {
+        App.vocab.view = "overview";
+      } else if (target === "grammar" && App.activeTab === "grammar") {
+        App.grammar.view = "overview";
+      }
+      switchTab(target);
+    });
   });
 
   document.getElementById("wf-filters").addEventListener("click", (e) => {
@@ -4476,21 +4633,60 @@ function bindEvents() {
     if (!chip) return;
     App.wfFilter = chip.dataset.filter;
     document.querySelectorAll("#wf-filters .chip").forEach((c) => c.classList.toggle("active", c === chip));
-    renderDashboard();
+    renderVocabOverview();
   });
 
   document.getElementById("wf-search").addEventListener("input", (e) => {
     App.wfSearch = e.target.value;
-    renderDashboard();
+    renderVocabOverview();
+  });
+
+  document.getElementById("vocab-overview-view").addEventListener("click", (e) => {
+    const wfBtn = e.target.closest("[data-open-wf]");
+    if (wfBtn) openVocabField(wfBtn.dataset.openWf);
+  });
+
+  document.getElementById("btn-vocab-back").addEventListener("click", () => {
+    App.vocab.view = "overview";
+    renderVocabTab();
+  });
+
+  document.getElementById("gr-overview-view").addEventListener("click", (e) => {
+    const pfBtn = e.target.closest("[data-gr-pillar]");
+    if (pfBtn) {
+      App.grammar.pillar = pfBtn.dataset.grPillar;
+      renderGrammarOverview();
+      return;
+    }
+    const grBtn = e.target.closest("[data-open-gr]");
+    if (grBtn) openGrammarTopic(grBtn.dataset.openGr);
+  });
+
+  document.getElementById("btn-gr-back").addEventListener("click", () => {
+    App.grammar.view = "overview";
+    renderGrammarTab();
+  });
+
+  document.getElementById("gr-rule-card").addEventListener("click", (e) => {
+    const speakBtn = e.target.closest("[data-speak]");
+    if (speakBtn) {
+      speakFrench(speakBtn.dataset.speak);
+      return;
+    }
+    if (e.target.closest("[data-gr-toggle-rule]")) {
+      App.grammar.ruleCollapsed = !App.grammar.ruleCollapsed;
+      renderGrammarRuleCard();
+    }
   });
 
   document.getElementById("tab-dashboard").addEventListener("click", (e) => {
     const tabBtn = e.target.closest("[data-goto-tab]");
-    if (tabBtn) switchTab(tabBtn.dataset.gotoTab);
-    const wfBtn = e.target.closest("[data-open-wf]");
-    if (wfBtn) openVocabField(wfBtn.dataset.openWf);
-    const grBtn = e.target.closest("[data-open-gr]");
-    if (grBtn) openGrammarTopic(grBtn.dataset.openGr);
+    if (tabBtn) {
+      if (tabBtn.dataset.gotoSpeakMode) App.speak.mode = tabBtn.dataset.gotoSpeakMode;
+      if (tabBtn.dataset.gotoTab === "vocab") App.vocab.view = "overview";
+      if (tabBtn.dataset.gotoTab === "grammar") App.grammar.view = "overview";
+      switchTab(tabBtn.dataset.gotoTab);
+    }
     const evalRow = e.target.closest("[data-open-eval]");
     if (evalRow) {
       const id = evalRow.dataset.openEval;
@@ -4633,16 +4829,9 @@ function bindEvents() {
     if (btn) setVocabMode(btn.dataset.vocabMode);
   });
 
-  document.getElementById("gr-pillar-select").addEventListener("change", (e) => {
-    App.grammar.pillar = e.target.value;
-    App.grammar.session = null;
-    App.grammar.offlineSession = null;
-    populateGrammarTopics();
-    renderGrammarStage();
-  });
-
   document.getElementById("gr-topic-select").addEventListener("change", (e) => {
     App.grammar.topicId = e.target.value;
+    App.grammar.ruleCollapsed = false;
     App.grammar.session = null;
     App.grammar.offlineSession = null;
     showGrammarError("");
@@ -4733,12 +4922,10 @@ function bindEvents() {
     App.speak.dialogue = null;
     scheduleSaveProgress();
     renderDashboard();
+    if (App.activeTab === "vocab") renderVocabTab();
+    if (App.activeTab === "grammar") renderGrammarTab();
     if (App.activeTab === "schrijven") renderWritingModule();
     if (App.activeTab === "spreken") renderSpeakingModule();
-    if (App.activeTab === "drill") {
-      renderVocabStage();
-      renderGrammarStage();
-    }
     showConfigFeedback("Voortgang gewist.");
   });
 }

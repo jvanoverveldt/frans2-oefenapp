@@ -28,7 +28,13 @@
 
     <nav class="tabbar" aria-label="Hoofdnavigatie">
       <button class="tab-btn active" data-tab="dashboard" type="button">
-        <span>Voortgang</span>
+        <span>Overzicht</span>
+      </button>
+      <button class="tab-btn" data-tab="vocab" type="button">
+        <span>Woordenschat</span>
+      </button>
+      <button class="tab-btn" data-tab="grammar" type="button">
+        <span>Grammatica</span>
       </button>
       <button class="tab-btn" data-tab="schrijven" type="button">
         <span>Schrijven</span>
@@ -38,62 +44,122 @@
         <span>Spreken &amp; Gesprek</span>
         <span class="tab-weight">38%</span>
       </button>
-      <button class="tab-btn" data-tab="literatuur" type="button">
-        <span>Literatuur</span>
-        <span class="tab-weight">4%</span>
-      </button>
-      <button class="tab-btn" data-tab="drill" type="button">
-        <span>Woordenschat &amp; Grammatica</span>
-      </button>
     </nav>
   </header>
 
   <main class="container">
     <div id="global-banner" class="banner hidden" role="alert"></div>
 
-    <!-- TAB 1: VOORTGANGSDASHBOARD -->
+    <!-- TAB 1: OVERZICHT (ENKEL HOOFDONDERDELEN) -->
     <section id="tab-dashboard" class="tab-panel active">
-      <div class="kpi-grid" id="dashboard-kpis"></div>
+      <div class="section-header" style="margin-top:0;">
+        <div>
+          <h2>Taalbasis (voorbereiding)</h2>
+          <span class="muted">Woordenschat en grammatica vormen de basis voor schrijven en spreken</span>
+        </div>
+      </div>
+      <div class="base-grid" id="dashboard-base-cards"></div>
 
       <div class="section-header">
-        <h2>Examenonderdelen</h2>
-        <span class="muted">Exacte weging Vlaamse Examencommissie</span>
+        <div>
+          <h2>Examenvoorbereiding (gewogen)</h2>
+          <span class="muted">Minstens 3× niveau <strong>Goed</strong> (of Excellent) per onderdeel = Beheerst</span>
+        </div>
       </div>
+      <div class="card" id="dashboard-exam-overall" style="margin-bottom:0.9rem;"></div>
       <div class="exam-grid" id="dashboard-exam-cards"></div>
 
       <div class="section-header">
-        <div>
-          <h2>23 Woordvelden</h2>
-          <span class="muted" id="wf-summary-text"></span>
-        </div>
-        <div class="toolbar">
-          <input id="wf-search" class="input input-sm" type="search" placeholder="Zoek woordveld…" aria-label="Zoek woordveld" />
-          <div class="filter-group" id="wf-filters">
-            <button class="chip active" data-filter="all" type="button">Alle</button>
-            <button class="chip" data-filter="niet_gestart" type="button">Niet gestart</button>
-            <button class="chip" data-filter="oefenen" type="button">Oefenen</button>
-            <button class="chip" data-filter="beheerst" type="button">Beheerst</button>
-          </div>
-        </div>
-      </div>
-      <div class="wf-grid" id="dashboard-wf-grid"></div>
-
-      <div class="section-header">
-        <div>
-          <h2>Grammatica (4 pijlers · 17 onderdelen)</h2>
-          <span class="muted" id="gr-summary-text"></span>
-        </div>
-      </div>
-      <div class="gr-pillars" id="dashboard-gr-pillars"></div>
-
-      <div class="section-header">
         <h2>Recente AI-evaluaties</h2>
-        <span class="muted">Laatste beoordelingen uit Schrijven, Spreken en Literatuur</span>
+        <span class="muted">Klik op een evaluatie om de volledige tekst of transcriptie terug te lezen</span>
       </div>
       <div class="card" id="dashboard-history"></div>
     </section>
 
-    <!-- TAB 2: SCHRIJVEN & SCHRIFTELIJKE INTERACTIE (58%) -->
+    <!-- TAB 2: WOORDENSCHAT (OVERZICHTSLIJST -> OEFENEN) -->
+    <section id="tab-vocab" class="tab-panel">
+      <div id="vocab-overview-view">
+        <div class="card" id="vocab-overall-card" style="margin-bottom:1rem;"></div>
+        <div class="section-header" style="margin-top:0.5rem;">
+          <div>
+            <h2>23 Woordvelden</h2>
+            <span class="muted" id="vocab-list-summary"></span>
+          </div>
+          <div class="toolbar">
+            <input id="wf-search" class="input input-sm" type="search" placeholder="Zoek woordveld…" aria-label="Zoek woordveld" />
+            <div class="filter-group" id="wf-filters">
+              <button class="chip active" data-filter="all" type="button">Alle</button>
+              <button class="chip" data-filter="niet_gestart" type="button">Niet gestart</button>
+              <button class="chip" data-filter="oefenen" type="button">Oefenen</button>
+              <button class="chip" data-filter="beheerst" type="button">Beheerst</button>
+            </div>
+          </div>
+        </div>
+        <div class="compact-list" id="vocab-wf-list"></div>
+      </div>
+
+      <div id="vocab-practice-view" class="hidden">
+        <div class="card drill-controls">
+          <div class="drill-select-row">
+            <button id="btn-vocab-back" class="btn btn-secondary btn-sm" type="button">← Alle 23 woordvelden</button>
+            <div class="drill-field">
+              <label for="vocab-wf-select">Woordveld</label>
+              <select id="vocab-wf-select" class="input"></select>
+            </div>
+            <div class="drill-field drill-field-sm" id="vocab-group-wrap">
+              <label for="vocab-group-select">Deelthema</label>
+              <select id="vocab-group-select" class="input"></select>
+            </div>
+            <div class="drill-status-wrap" id="vocab-wf-meta"></div>
+          </div>
+          <div class="mode-bar" id="vocab-mode-bar" role="tablist" aria-label="Oefenvorm woordenschat"></div>
+        </div>
+        <div id="vocab-stage" class="drill-stage"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: GRAMMATICA (OVERZICHTSLIJST -> REGEL + OEFENEN) -->
+    <section id="tab-grammar" class="tab-panel">
+      <div id="gr-overview-view">
+        <div class="card" id="gr-overall-card" style="margin-bottom:1rem;"></div>
+        <div class="section-header" style="margin-top:0.5rem;">
+          <div>
+            <h2>17 Grammatica-onderdelen (4 pijlers)</h2>
+            <span class="muted" id="gr-list-summary"></span>
+          </div>
+          <div class="filter-group" id="gr-pillar-filters"></div>
+        </div>
+        <div id="gr-topic-list"></div>
+      </div>
+
+      <div id="gr-practice-view" class="hidden">
+        <div class="card drill-controls">
+          <div class="drill-select-row">
+            <button id="btn-gr-back" class="btn btn-secondary btn-sm" type="button">← Alle 17 onderdelen</button>
+            <div class="drill-field">
+              <label for="gr-topic-select">Grammatica-onderdeel</label>
+              <select id="gr-topic-select" class="input"></select>
+            </div>
+            <div class="drill-status-wrap" id="gr-meta"></div>
+          </div>
+          <div class="mode-bar" id="gr-mode-bar" role="tablist" aria-label="Oefenvorm grammatica"></div>
+        </div>
+
+        <div id="gr-rule-card" class="card rule-always-card"></div>
+        <div id="gr-error" class="banner error hidden" role="alert"></div>
+        <div id="gr-stage" class="drill-stage"></div>
+
+        <div class="section-header">
+          <div>
+            <h2>Grammatica-archief</h2>
+            <span class="muted" id="gr-archive-count">Recente gemaakte oefenreeksen en feedback (handig voor de thuisleerkracht)</span>
+          </div>
+        </div>
+        <div id="gr-archive"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: SCHRIJVEN & SCHRIFTELIJKE INTERACTIE (58%) -->
     <section id="tab-schrijven" class="tab-panel">
       <div class="card drill-controls">
         <div class="mode-bar" id="write-mode-bar" style="border-top:none;padding-top:0;" role="tablist" aria-label="Schrijfmodus"></div>
@@ -125,7 +191,7 @@
       <div id="write-archive"></div>
     </section>
 
-    <!-- TAB 3: SPREKEN & GESPREK (38%) -->
+    <!-- TAB 5: SPREKEN & GESPREK (38%) -->
     <section id="tab-spreken" class="tab-panel">
       <div class="card drill-controls">
         <div class="mode-bar" id="speak-mode-bar" style="border-top:none;padding-top:0;" role="tablist" aria-label="Spreekmodus"></div>
@@ -155,65 +221,6 @@
         </div>
       </div>
       <div id="speak-archive"></div>
-    </section>
-
-    <!-- TAB 4: LITERATUURBELEVING (FASE 6) -->
-    <section id="tab-literatuur" class="tab-panel">
-      <div class="card empty-module">
-        <h2>Literatuurbeleving (4%)</h2>
-        <p class="muted">Wordt uitgebouwd in <strong>Fase 6</strong>: B1-gedicht of verhaalfragment met 2 persoonlijke reflectievragen over eigen gevoelens en ervaringen, inclusief AI-feedback.</p>
-      </div>
-    </section>
-
-    <!-- TAB 5: WOORDENSCHAT & GRAMMATICA (FASE 3A & 3B) -->
-    <section id="tab-drill" class="tab-panel">
-      <div class="subtab-bar">
-        <button class="subtab-btn active" data-subtab="vocab" type="button">Woordenschat (23 velden · offline)</button>
-        <button class="subtab-btn" data-subtab="grammar" type="button">Grammatica Coach (4 pijlers · hybride AI)</button>
-      </div>
-      <div id="subtab-vocab" class="subtab-panel active">
-        <div class="card drill-controls">
-          <div class="drill-select-row">
-            <div class="drill-field">
-              <label for="vocab-wf-select">Woordveld</label>
-              <select id="vocab-wf-select" class="input"></select>
-            </div>
-            <div class="drill-field drill-field-sm" id="vocab-group-wrap">
-              <label for="vocab-group-select">Deelthema</label>
-              <select id="vocab-group-select" class="input"></select>
-            </div>
-            <div class="drill-status-wrap" id="vocab-wf-meta"></div>
-          </div>
-          <div class="mode-bar" id="vocab-mode-bar" role="tablist" aria-label="Oefenvorm woordenschat"></div>
-        </div>
-        <div id="vocab-stage" class="drill-stage"></div>
-      </div>
-      <div id="subtab-grammar" class="subtab-panel">
-        <div class="card drill-controls">
-          <div class="drill-select-row">
-            <div class="drill-field drill-field-sm">
-              <label for="gr-pillar-select">Grammaticapijler</label>
-              <select id="gr-pillar-select" class="input"></select>
-            </div>
-            <div class="drill-field">
-              <label for="gr-topic-select">Onderdeel</label>
-              <select id="gr-topic-select" class="input"></select>
-            </div>
-            <div class="drill-status-wrap" id="gr-meta"></div>
-          </div>
-          <div class="mode-bar" id="gr-mode-bar" role="tablist" aria-label="Oefenvorm grammatica"></div>
-        </div>
-        <div id="gr-error" class="banner error hidden" role="alert"></div>
-        <div id="gr-stage" class="drill-stage"></div>
-
-        <div class="section-header">
-          <div>
-            <h2>Grammatica-archief</h2>
-            <span class="muted" id="gr-archive-count">Recente gemaakte oefenreeksen en feedback (handig voor de thuisleerkracht)</span>
-          </div>
-        </div>
-        <div id="gr-archive"></div>
-      </div>
     </section>
   </main>
 
