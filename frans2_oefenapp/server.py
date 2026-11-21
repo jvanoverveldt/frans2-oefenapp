@@ -39,6 +39,27 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+class TLSThreadingHTTPServer(ReusableThreadingHTTPServer):
+    def __init__(self, server_address, handler_class, ssl_context):
+        self.ssl_context = ssl_context
+        super().__init__(server_address, handler_class)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            request.settimeout(15)
+            tls_sock = self.ssl_context.wrap_socket(request, server_side=True)
+            tls_sock.settimeout(None)
+        except ssl.SSLError as exc:
+            print(f"[frans2-https] TLS-handshake afgebroken door {client_address[0]}: {exc}", flush=True)
+            self.shutdown_request(request)
+            return
+        except OSError as exc:
+            print(f"[frans2-https] Verbindingsfout van {client_address[0]}: {exc}", flush=True)
+            self.shutdown_request(request)
+            return
+        super().process_request_thread(tls_sock, client_address)
+
+
 def ensure_data_dir():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -270,9 +291,9 @@ def start_optional_https_server():
 
     try:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
-        https_server = ReusableThreadingHTTPServer((HOST, HTTPS_PORT), FransHandler)
-        https_server.socket = ctx.wrap_socket(https_server.socket, server_side=True)
+        https_server = TLSThreadingHTTPServer((HOST, HTTPS_PORT), FransHandler, ctx)
         thread = threading.Thread(target=https_server.serve_forever, daemon=True)
         thread.start()
         HTTPS_ACTIVE = True

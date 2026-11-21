@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- HTTPS-server verbeterd met per-verbinding TLS-handshake (`TLSThreadingHTTPServer`) en duidelijke TLS-logging zodat afgebroken browser-handshakes andere verbindingen nooit blokkeren.
+- Zelf-ondertekend lokaal certificaat bijgewerkt naar 800 dagen met X.509 v3 `serverAuth`-extensies voor betere compatibiliteit met Chrome, Edge, Safari, iOS en Android.
+
 ## 1.0.1
 
 - `python3` expliciet geïnstalleerd in de Alpine-container (`apk add --no-cache python3 openssl`) zodat de add-on ook op Home Assistant's standaard base image direct opstart.

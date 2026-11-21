@@ -56,15 +56,19 @@ if [ "$ENABLE_HTTPS" = "true" ]; then
             CURRENT_HOST="$(cat "$HOST_STAMP")"
         fi
 
-        if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ] || [ "$CURRENT_HOST" != "$HTTPS_HOSTNAME" ]; then
+        CERT_STAMP="v2:${HTTPS_HOSTNAME}"
+        if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ] || [ "$CURRENT_HOST" != "$CERT_STAMP" ]; then
             echo "[frans2] Zelf-ondertekend lokaal HTTPS-certificaat genereren voor ${HTTPS_HOSTNAME}..."
-            openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 \
+            openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 800 \
                 -keyout "$KEY_PATH" \
                 -out "$CERT_PATH" \
                 -subj "/CN=${HTTPS_HOSTNAME}" \
-                -addext "subjectAltName=${SSL_SAN}" >/dev/null 2>&1
+                -addext "subjectAltName=${SSL_SAN}" \
+                -addext "basicConstraints=CA:FALSE" \
+                -addext "keyUsage=digitalSignature,keyEncipherment" \
+                -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
             chmod 600 "$KEY_PATH"
-            printf '%s' "$HTTPS_HOSTNAME" > "$HOST_STAMP"
+            printf '%s' "$CERT_STAMP" > "$HOST_STAMP"
         fi
 
         export SSL_CERTFILE="$CERT_PATH"
