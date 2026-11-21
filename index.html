@@ -124,10 +124,17 @@
         <button class="subtab-btn" data-subtab="grammar" type="button">Grammatica Coach (4 pijlers · hybride AI)</button>
       </div>
       <div id="subtab-vocab" class="subtab-panel active">
-        <div class="card empty-module">
-          <h2>Woordenschat Drill (Fase 3A)</h2>
-          <p class="muted">Volgende stap: 100% offline oefenen op alle 23 woordvelden (flitskaarten, contextuele invuloefeningen en zinsbouw-puzzels).</p>
+        <div class="card drill-controls">
+          <div class="drill-select-row">
+            <div class="drill-field">
+              <label for="vocab-wf-select">Woordveld</label>
+              <select id="vocab-wf-select" class="input"></select>
+            </div>
+            <div class="drill-status-wrap" id="vocab-wf-meta"></div>
+          </div>
+          <div class="mode-bar" id="vocab-mode-bar" role="tablist" aria-label="Oefenvorm woordenschat"></div>
         </div>
+        <div id="vocab-stage" class="drill-stage"></div>
       </div>
       <div id="subtab-grammar" class="subtab-panel">
         <div class="card empty-module">
