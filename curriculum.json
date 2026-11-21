@@ -1,0 +1,1065 @@
+{
+  "meta": {
+    "vak": "Frans 2",
+    "graad": "2de graad doorstroomfinaliteit",
+    "niveau": "B1",
+    "geldigheid": "2027"
+  },
+  "examen": {
+    "weging": {
+      "schrijven": 58,
+      "schrijven_deel": 29,
+      "schriftelijke_interactie": 29,
+      "spreken_totaal": 38,
+      "monoloog": 8,
+      "gesprek": 30,
+      "literatuurbeleving": 4
+    },
+    "tijd": {
+      "schrijven_per_opdracht_min": 45,
+      "schrijven_twee_opdrachten_min": 90,
+      "gesprek_voorbereiding_min": 15,
+      "gesprek_dialoog_min": 10
+    },
+    "hulpmiddelen": [
+      { "naam": "Van Dale", "url": "https://www.vandale.be/" },
+      { "naam": "Spelling.nu", "url": "https://www.spelling.nu/" }
+    ],
+    "beoordelingscriteria": [
+      {
+        "id": "taakvoltooiing",
+        "naam": "Taakvoltooiing",
+        "toepassing": "alle",
+        "rubric": "Doel bereikt, boodschap komt helder over, alle inhoudspunten volledig en ter zake uitgewerkt, opgegeven lengte gerespecteerd."
+      },
+      {
+        "id": "woordenschat",
+        "naam": "Woordenschat",
+        "toepassing": "alle",
+        "rubric": "Vrij brede B1-woordenschat; frequente woorden, woordcombinaties en vaste uitdrukkingen correct gebruikt."
+      },
+      {
+        "id": "grammatica",
+        "naam": "Grammatica en zinsbouw",
+        "toepassing": "alle",
+        "rubric": "Goede beheersing van grammatica en zinsbouw; fouten verstoren de communicatie niet; af en toe samengestelde zinnen."
+      },
+      {
+        "id": "tekststructuur",
+        "naam": "Tekststructuur en signaalwoorden",
+        "toepassing": "alle",
+        "rubric": "Gepaste, herkenbare structuur (inleiding, midden, slot) met duidelijke tekstverbanden via signaalwoorden en verwijswoorden."
+      },
+      {
+        "id": "register",
+        "naam": "Register en beleefdheidsconventies",
+        "toepassing": "alle",
+        "rubric": "Gepast register (neutraal of informeel naargelang ontvanger) en juiste beleefdheidsconventies (tu/vous, conditionnel de politesse)."
+      },
+      {
+        "id": "layout",
+        "naam": "Tekstopbouw en lay-out",
+        "toepassing": "schrijven",
+        "rubric": "Duidelijk herkenbare opbouw (titel/onderwerp, aanspreking, alinea's, groet) en verzorgde lay-out."
+      },
+      {
+        "id": "spelling_uitspraak",
+        "naam": "Spelling / Uitspraak",
+        "toepassing": "alle",
+        "rubric": "Schrijven: spelfouten en leestekens hinderen het begrip niet. Spreken/gesprek: voldoende heldere uitspraak/intonatie, vlot spreektempo ondanks korte pauzes, gepaste lichaamstaal."
+      }
+    ],
+    "signaalwoorden": {
+      "chronologisch": ["d'abord", "ensuite", "puis", "enfin", "après"],
+      "oorzaak_reden": ["parce que", "car", "à cause de", "grâce à", "comme"],
+      "gevolg_conclusie": ["donc", "par conséquent", "alors", "ainsi", "en résumé"],
+      "tegenstelling_toegeving": ["mais", "pourtant", "cependant", "bien que", "malgré"],
+      "opsomming_toelichting": ["premièrement", "de plus", "par exemple", "notamment", "aussi"],
+      "voorwaarde_doel": ["si", "pour", "afin de", "pour que"]
+    }
+  },
+  "communicatieve_doelen": [
+    {
+      "id": "sociale_contacten",
+      "naam": "Sociale contacten leggen en onderhouden",
+      "beschrijving": "Begroeten, aanspreken, afscheid nemen, iets voorstellen, bedanken, uitnodigen, zich verontschuldigen, reageren op verontschuldigingen en waardering uiten.",
+      "tekstsoorten": ["e-mail aan vriend of organisatie", "uitnodiging", "bedankbericht", "verontschuldiging"],
+      "bouwstenen": ["Bonjour / Salut", "Je vous remercie beaucoup", "Je suis vraiment désolé(e)", "Et si on allait... ?", "Je t'invite à..."]
+    },
+    {
+      "id": "informatie",
+      "naam": "Informatie vragen en geven",
+      "beschrijving": "Gericht vragen stellen en duidelijke, volledige informatie geven over praktische onderwerpen.",
+      "tekstsoorten": ["formele e-mail naar gemeente of club", "infobrochure", "antwoordmail over stage of activiteit"],
+      "bouwstenen": ["Pourriez-vous me renseigner sur... ?", "Je voudrais savoir si...", "Voici les informations demandées", "N'hésitez pas à me contacter"]
+    },
+    {
+      "id": "mening",
+      "naam": "Mening geven",
+      "beschrijving": "Een eigen standpunt formuleren, onderbouwen met argumenten en reageren op andermans mening.",
+      "tekstsoorten": ["reactie op online forum of sociale media", "recensie", "overleg met vriend(in)"],
+      "bouwstenen": ["À mon avis", "Je pense que", "Je suis d'accord avec...", "Par contre, je trouve que...", "Un avantage est que..."]
+    },
+    {
+      "id": "vertellen",
+      "naam": "Iets vertellen",
+      "beschrijving": "Gebeurtenissen, ervaringen of een verslag chronologisch beschrijven met gebruik van verleden tijden (passé composé en imparfait).",
+      "tekstsoorten": ["reisverslag", "blogbericht", "verslag van een activiteit of ongeval"],
+      "bouwstenen": ["D'abord", "Tout à coup", "Pendant que", "Finalement", "C'était une expérience inoubliable"]
+    },
+    {
+      "id": "uitleggen",
+      "naam": "Iets uitleggen",
+      "beschrijving": "Stapsgewijs een werkwijze, tip, studiemethode of handleiding helder toelichten.",
+      "tekstsoorten": ["stappenplan", "tips-artikel", "uitleg over studiemethode of recept"],
+      "bouwstenen": ["Premièrement", "Il faut d'abord...", "Je te conseille de...", "Pour réussir, il est important de...", "En résumé"]
+    },
+    {
+      "id": "overtuigen",
+      "naam": "Iemand overtuigen",
+      "beschrijving": "Iemand met sterke argumenten en gepaste toon overhalen om een voorstel, kandidaatstelling of idee te aanvaarden.",
+      "tekstsoorten": ["motivatiebrief", "inschrijving voor wedstrijd of casting", "overtuigende e-mail"],
+      "bouwstenen": ["Je suis convaincu(e) que...", "De plus", "C'est pourquoi", "Je serais ravi(e) de...", "J'espère vous avoir convaincu(e)"]
+    }
+  ],
+  "woordvelden": [
+    {
+      "id": "wf01",
+      "nummer": 1,
+      "titel_nl": "Cijfers, gewichten, maten, hoeveelheden",
+      "titel_fr": "Chiffres, poids, mesures, quantités",
+      "woorden": [
+        { "fr": "quinze", "nl": "vijftien" },
+        { "fr": "soixante-dix / septante", "nl": "zeventig" },
+        { "fr": "quatre-vingts", "nl": "tachtig" },
+        { "fr": "quatre-vingt-dix / nonante", "nl": "negentig" },
+        { "fr": "mille", "nl": "duizend" },
+        { "fr": "un gramme", "nl": "een gram" },
+        { "fr": "un kilogramme", "nl": "een kilogram" },
+        { "fr": "peser", "nl": "wegen" },
+        { "fr": "un mètre", "nl": "een meter" },
+        { "fr": "un kilomètre", "nl": "een kilometer" },
+        { "fr": "un mètre carré", "nl": "een vierkante meter" },
+        { "fr": "un litre", "nl": "een liter" },
+        { "fr": "beaucoup de", "nl": "veel" },
+        { "fr": "peu de", "nl": "weinig" },
+        { "fr": "assez de", "nl": "genoeg" },
+        { "fr": "trop de", "nl": "te veel" },
+        { "fr": "une pincée de", "nl": "een snuifje" },
+        { "fr": "un morceau de", "nl": "een stuk" },
+        { "fr": "une tranche de", "nl": "een plak" },
+        { "fr": "une bouteille de", "nl": "een fles" }
+      ],
+      "voorbeelden": [
+        { "fr": "Ce sac pèse deux kilos.", "nl": "Deze tas weegt twee kilo.", "gat": "pèse" },
+        { "fr": "Le couloir mesure trois mètres de long.", "nl": "De gang is drie meter lang.", "gat": "mètres" },
+        { "fr": "Il y a beaucoup de monde dans la rue.", "nl": "Er zijn veel mensen op straat.", "gat": "beaucoup" }
+      ]
+    },
+    {
+      "id": "wf02",
+      "nummer": 2,
+      "titel_nl": "Communicatie, multimedia",
+      "titel_fr": "Communication, multimédia",
+      "woorden": [
+        { "fr": "discuter", "nl": "discussiëren / bespreken" },
+        { "fr": "expliquer", "nl": "uitleggen" },
+        { "fr": "raconter", "nl": "vertellen" },
+        { "fr": "comprendre", "nl": "begrijpen" },
+        { "fr": "traduire", "nl": "vertalen" },
+        { "fr": "exprimer", "nl": "uitdrukken" },
+        { "fr": "convaincre", "nl": "overtuigen" },
+        { "fr": "argumenter", "nl": "argumenteren" },
+        { "fr": "un média", "nl": "een medium" },
+        { "fr": "la presse", "nl": "de pers" },
+        { "fr": "un journal", "nl": "een krant" },
+        { "fr": "un article", "nl": "een artikel" },
+        { "fr": "un reportage", "nl": "een reportage" },
+        { "fr": "une publicité", "nl": "een reclame" },
+        { "fr": "un documentaire", "nl": "een documentaire" },
+        { "fr": "un réseau social", "nl": "een sociaal netwerk" },
+        { "fr": "un site web", "nl": "een website" },
+        { "fr": "un podcast", "nl": "een podcast" },
+        { "fr": "fiable", "nl": "betrouwbaar" },
+        { "fr": "une rumeur", "nl": "een gerucht" }
+      ],
+      "voorbeelden": [
+        { "fr": "Je veux discuter d'un sujet important.", "nl": "Ik wil een belangrijk onderwerp bespreken.", "gat": "discuter" },
+        { "fr": "J'ai lu un article intéressant sur l'environnement.", "nl": "Ik heb een interessant artikel over het milieu gelezen.", "gat": "article" },
+        { "fr": "Ce site web est très fiable.", "nl": "Deze website is erg betrouwbaar.", "gat": "fiable" }
+      ]
+    },
+    {
+      "id": "wf03",
+      "nummer": 3,
+      "titel_nl": "Dagelijkse bezigheden",
+      "titel_fr": "Activités quotidiennes",
+      "woorden": [
+        { "fr": "se réveiller", "nl": "wakker worden" },
+        { "fr": "se lever", "nl": "opstaan" },
+        { "fr": "prendre une douche", "nl": "een douche nemen" },
+        { "fr": "se brosser les dents", "nl": "zijn tanden poetsen" },
+        { "fr": "se coiffer", "nl": "zich kammen" },
+        { "fr": "s'habiller", "nl": "zich aankleden" },
+        { "fr": "prendre le petit-déjeuner", "nl": "ontbijten" },
+        { "fr": "préparer le déjeuner", "nl": "de lunch klaarmaken" },
+        { "fr": "dîner en famille", "nl": "avondeten met het gezin" },
+        { "fr": "faire la vaisselle", "nl": "de afwas doen" },
+        { "fr": "aller à l'école", "nl": "naar school gaan" },
+        { "fr": "étudier", "nl": "studeren" },
+        { "fr": "répondre à un e-mail", "nl": "een e-mail beantwoorden" },
+        { "fr": "faire une pause", "nl": "een pauze nemen" },
+        { "fr": "rentrer à la maison", "nl": "naar huis terugkeren" },
+        { "fr": "faire le ménage", "nl": "het huishouden doen" },
+        { "fr": "passer l'aspirateur", "nl": "stofzuigen" },
+        { "fr": "se détendre", "nl": "zich ontspannen" },
+        { "fr": "se déshabiller", "nl": "zich uitkleden" },
+        { "fr": "se coucher", "nl": "gaan slapen" }
+      ],
+      "voorbeelden": [
+        { "fr": "Je me réveille à sept heures.", "nl": "Ik word wakker om zeven uur.", "gat": "réveille" },
+        { "fr": "Il se brosse les dents après chaque repas.", "nl": "Hij poetst zijn tanden na elke maaltijd.", "gat": "brosse" },
+        { "fr": "Nous prenons le petit-déjeuner à huit heures.", "nl": "We ontbijten om acht uur.", "gat": "petit-déjeuner" }
+      ]
+    },
+    {
+      "id": "wf04",
+      "nummer": 4,
+      "titel_nl": "Dagelijkse/persoonlijke voorwerpen",
+      "titel_fr": "Objets quotidiens et personnels",
+      "woorden": [
+        { "fr": "une brosse à dents", "nl": "een tandenborstel" },
+        { "fr": "un dentifrice", "nl": "een tandpasta" },
+        { "fr": "un savon", "nl": "een zeep" },
+        { "fr": "un shampoing", "nl": "een shampoo" },
+        { "fr": "un peigne", "nl": "een kam" },
+        { "fr": "une serviette de bain", "nl": "een badhanddoek" },
+        { "fr": "un mouchoir", "nl": "een zakdoek" },
+        { "fr": "un sac à dos", "nl": "een rugzak" },
+        { "fr": "une montre", "nl": "een horloge" },
+        { "fr": "des lunettes (f)", "nl": "een bril" },
+        { "fr": "un portefeuille", "nl": "een portefeuille" },
+        { "fr": "des clés (f)", "nl": "sleutels" },
+        { "fr": "un parapluie", "nl": "een paraplu" },
+        { "fr": "un téléphone portable", "nl": "een mobiele telefoon" },
+        { "fr": "un chargeur", "nl": "een oplader" },
+        { "fr": "des écouteurs (m)", "nl": "oortjes" },
+        { "fr": "un ordinateur", "nl": "een computer" },
+        { "fr": "un écran", "nl": "een scherm" },
+        { "fr": "un clavier", "nl": "een toetsenbord" },
+        { "fr": "une batterie", "nl": "een batterij" }
+      ],
+      "voorbeelden": [
+        { "fr": "J'ai oublié ma brosse à dents à la maison.", "nl": "Ik ben mijn tandenborstel thuis vergeten.", "gat": "brosse à dents" },
+        { "fr": "Mon téléphone n'a plus de batterie.", "nl": "Mijn telefoon is leeg.", "gat": "batterie" },
+        { "fr": "Il écoute de la musique avec ses écouteurs.", "nl": "Hij luistert naar muziek met zijn oortjes.", "gat": "écouteurs" }
+      ]
+    },
+    {
+      "id": "wf05",
+      "nummer": 5,
+      "titel_nl": "Dagen, maanden, seizoenen, feesten",
+      "titel_fr": "Jours, mois, saisons, fêtes",
+      "woorden": [
+        { "fr": "lundi", "nl": "maandag" },
+        { "fr": "mercredi", "nl": "woensdag" },
+        { "fr": "vendredi", "nl": "vrijdag" },
+        { "fr": "dimanche", "nl": "zondag" },
+        { "fr": "un jour ouvré", "nl": "een werkdag" },
+        { "fr": "un jour férié", "nl": "een feestdag (vrije dag)" },
+        { "fr": "janvier", "nl": "januari" },
+        { "fr": "février", "nl": "februari" },
+        { "fr": "juillet", "nl": "juli" },
+        { "fr": "août", "nl": "augustus" },
+        { "fr": "décembre", "nl": "december" },
+        { "fr": "le printemps", "nl": "de lente" },
+        { "fr": "l'été (m)", "nl": "de zomer" },
+        { "fr": "l'automne (m)", "nl": "de herfst" },
+        { "fr": "l'hiver (m)", "nl": "de winter" },
+        { "fr": "Noël", "nl": "Kerstmis" },
+        { "fr": "le réveillon", "nl": "oudejaarsavond / kerstavond" },
+        { "fr": "le jour de l'an", "nl": "Nieuwjaarsdag" },
+        { "fr": "Pâques", "nl": "Pasen" },
+        { "fr": "un anniversaire", "nl": "een verjaardag" }
+      ],
+      "voorbeelden": [
+        { "fr": "Le mercredi, j'ai une réunion importante.", "nl": "Op woensdag heb ik een belangrijke vergadering.", "gat": "mercredi" },
+        { "fr": "En janvier, il neige souvent.", "nl": "In januari sneeuwt het vaak.", "gat": "janvier" },
+        { "fr": "Nous fêtons Noël en famille.", "nl": "We vieren Kerstmis met familie.", "gat": "Noël" }
+      ]
+    },
+    {
+      "id": "wf06",
+      "nummer": 6,
+      "titel_nl": "Eten en drinken",
+      "titel_fr": "Nourriture et boissons",
+      "woorden": [
+        { "fr": "la nourriture", "nl": "het eten" },
+        { "fr": "une boisson", "nl": "een drank" },
+        { "fr": "un repas équilibré", "nl": "een evenwichtige maaltijd" },
+        { "fr": "un plat", "nl": "een gerecht" },
+        { "fr": "une recette", "nl": "een recept" },
+        { "fr": "un ingrédient", "nl": "een ingrediënt" },
+        { "fr": "un dessert", "nl": "een dessert" },
+        { "fr": "le poulet", "nl": "kip" },
+        { "fr": "le bœuf", "nl": "rundvlees" },
+        { "fr": "le poisson", "nl": "vis" },
+        { "fr": "les fruits de mer", "nl": "zeevruchten" },
+        { "fr": "le fromage", "nl": "kaas" },
+        { "fr": "le lait", "nl": "melk" },
+        { "fr": "le beurre", "nl": "boter" },
+        { "fr": "le yaourt", "nl": "yoghurt" },
+        { "fr": "un légume", "nl": "een groente" },
+        { "fr": "une fraise", "nl": "een aardbei" },
+        { "fr": "le raisin", "nl": "de druif" },
+        { "fr": "le pain", "nl": "het brood" },
+        { "fr": "varié(e)", "nl": "gevarieerd" }
+      ],
+      "voorbeelden": [
+        { "fr": "J'aime préparer des repas équilibrés.", "nl": "Ik houd ervan om evenwichtige maaltijden te maken.", "gat": "équilibrés" },
+        { "fr": "Nous avons mangé des fruits de mer au dîner.", "nl": "We hebben zeevruchten gegeten tijdens het diner.", "gat": "fruits de mer" },
+        { "fr": "Je préfère le fromage de chèvre.", "nl": "Ik geef de voorkeur aan geitenkaas.", "gat": "fromage" }
+      ]
+    },
+    {
+      "id": "wf07",
+      "nummer": 7,
+      "titel_nl": "Familie",
+      "titel_fr": "La famille",
+      "woorden": [
+        { "fr": "les parents", "nl": "de ouders" },
+        { "fr": "un enfant", "nl": "een kind" },
+        { "fr": "un frère", "nl": "een broer" },
+        { "fr": "une sœur", "nl": "een zus" },
+        { "fr": "un fils", "nl": "een zoon" },
+        { "fr": "une fille", "nl": "een dochter" },
+        { "fr": "les grands-parents", "nl": "de grootouders" },
+        { "fr": "un oncle", "nl": "een oom" },
+        { "fr": "une tante", "nl": "een tante" },
+        { "fr": "un cousin / une cousine", "nl": "een neef / nicht (oom/tante)" },
+        { "fr": "un neveu / une nièce", "nl": "een neef / nicht (broer/zus)" },
+        { "fr": "un beau-père", "nl": "een schoonvader / stiefvader" },
+        { "fr": "une belle-mère", "nl": "een schoonmoeder / stiefmoeder" },
+        { "fr": "un demi-frère", "nl": "een halfbroer" },
+        { "fr": "le mari", "nl": "de echtgenoot" },
+        { "fr": "la femme", "nl": "de echtgenote" },
+        { "fr": "se marier", "nl": "trouwen" },
+        { "fr": "le divorce", "nl": "de scheiding" },
+        { "fr": "fiancé(e)", "nl": "verloofd" },
+        { "fr": "le soutien", "nl": "de steun" }
+      ],
+      "voorbeelden": [
+        { "fr": "Mes parents vivent à la campagne.", "nl": "Mijn ouders wonen op het platteland.", "gat": "parents" },
+        { "fr": "Mon grand-père adore raconter des histoires.", "nl": "Mijn grootvader houdt ervan om verhalen te vertellen.", "gat": "grand-père" },
+        { "fr": "Mes parents sont mariés depuis vingt ans.", "nl": "Mijn ouders zijn al twintig jaar getrouwd.", "gat": "mariés" }
+      ]
+    },
+    {
+      "id": "wf08",
+      "nummer": 8,
+      "titel_nl": "Gevoelens",
+      "titel_fr": "Les sentiments et émotions",
+      "woorden": [
+        { "fr": "une émotion", "nl": "een gevoel / emotie" },
+        { "fr": "un sentiment", "nl": "een gevoel" },
+        { "fr": "une humeur", "nl": "een humeur" },
+        { "fr": "la joie", "nl": "de vreugde" },
+        { "fr": "le bonheur", "nl": "het geluk" },
+        { "fr": "la fierté", "nl": "de trots" },
+        { "fr": "l'amour (m)", "nl": "de liefde" },
+        { "fr": "l'enthousiasme (m)", "nl": "het enthousiasme" },
+        { "fr": "la confiance", "nl": "het vertrouwen" },
+        { "fr": "la gratitude", "nl": "de dankbaarheid" },
+        { "fr": "l'espoir (m)", "nl": "de hoop" },
+        { "fr": "le calme", "nl": "de rust" },
+        { "fr": "la tristesse", "nl": "het verdriet" },
+        { "fr": "la colère", "nl": "de woede" },
+        { "fr": "la peur", "nl": "de angst" },
+        { "fr": "l'angoisse (f)", "nl": "de beklemmende angst" },
+        { "fr": "la déception", "nl": "de teleurstelling" },
+        { "fr": "le stress", "nl": "de stress" },
+        { "fr": "l'épuisement (m)", "nl": "de uitputting" },
+        { "fr": "ressentir", "nl": "voelen / ervaren" }
+      ],
+      "voorbeelden": [
+        { "fr": "Elle ressent un grand bonheur avec sa famille.", "nl": "Ze voelt veel geluk met haar familie.", "gat": "bonheur" },
+        { "fr": "Il a beaucoup d'espoir pour l'avenir.", "nl": "Hij heeft veel hoop voor de toekomst.", "gat": "espoir" },
+        { "fr": "Il a ressenti de la tristesse après la perte de son ami.", "nl": "Hij voelde verdriet na het verlies van zijn vriend.", "gat": "tristesse" }
+      ]
+    },
+    {
+      "id": "wf09",
+      "nummer": 9,
+      "titel_nl": "Gezondheid en lichaamsdelen",
+      "titel_fr": "Santé et parties du corps",
+      "woorden": [
+        { "fr": "la santé", "nl": "de gezondheid" },
+        { "fr": "être en bonne santé", "nl": "gezond zijn" },
+        { "fr": "un médecin", "nl": "een arts" },
+        { "fr": "l'hôpital (m)", "nl": "het ziekenhuis" },
+        { "fr": "la pharmacie", "nl": "de apotheek" },
+        { "fr": "un médicament", "nl": "een medicijn" },
+        { "fr": "une ordonnance", "nl": "een voorschrift" },
+        { "fr": "la grippe", "nl": "de griep" },
+        { "fr": "un rhume", "nl": "een verkoudheid" },
+        { "fr": "la fièvre", "nl": "de koorts" },
+        { "fr": "la douleur", "nl": "de pijn" },
+        { "fr": "une blessure", "nl": "een verwonding" },
+        { "fr": "la tête", "nl": "het hoofd" },
+        { "fr": "les yeux (m)", "nl": "de ogen" },
+        { "fr": "le cou", "nl": "de nek" },
+        { "fr": "une épaule", "nl": "een schouder" },
+        { "fr": "un bras", "nl": "een arm" },
+        { "fr": "une main", "nl": "een hand" },
+        { "fr": "le dos", "nl": "de rug" },
+        { "fr": "une jambe", "nl": "een been" }
+      ],
+      "voorbeelden": [
+        { "fr": "Il a pris un médicament contre la douleur.", "nl": "Hij heeft een medicijn genomen tegen de pijn.", "gat": "douleur" },
+        { "fr": "Il a la grippe depuis trois jours.", "nl": "Hij heeft al drie dagen de griep.", "gat": "grippe" },
+        { "fr": "J'ai mal au dos après avoir porté des sacs lourds.", "nl": "Ik heb pijn in mijn rug nadat ik zware tassen heb gedragen.", "gat": "dos" }
+      ]
+    },
+    {
+      "id": "wf10",
+      "nummer": 10,
+      "titel_nl": "Instructietaal",
+      "titel_fr": "Langage d'instruction",
+      "woorden": [
+        { "fr": "une instruction", "nl": "een instructie" },
+        { "fr": "une consigne", "nl": "een opdracht / richtlijn" },
+        { "fr": "une règle", "nl": "een regel" },
+        { "fr": "une étape", "nl": "een stap" },
+        { "fr": "une méthode", "nl": "een methode" },
+        { "fr": "un formulaire", "nl": "een formulier" },
+        { "fr": "lire", "nl": "lezen" },
+        { "fr": "écouter", "nl": "luisteren" },
+        { "fr": "suivre", "nl": "volgen" },
+        { "fr": "compléter", "nl": "aanvullen" },
+        { "fr": "remplir", "nl": "invullen" },
+        { "fr": "choisir", "nl": "kiezen" },
+        { "fr": "utiliser", "nl": "gebruiken" },
+        { "fr": "ouvrir", "nl": "openen" },
+        { "fr": "vérifier", "nl": "controleren" },
+        { "fr": "répéter", "nl": "herhalen" },
+        { "fr": "préparer", "nl": "voorbereiden" },
+        { "fr": "prouver", "nl": "bewijzen" },
+        { "fr": "attentivement", "nl": "aandachtig" },
+        { "fr": "tout de suite", "nl": "onmiddellijk" }
+      ],
+      "voorbeelden": [
+        { "fr": "Lisez les instructions avant de commencer.", "nl": "Lees de instructies voordat je begint.", "gat": "instructions" },
+        { "fr": "Complétez le formulaire avec vos informations.", "nl": "Vul het formulier in met je gegevens.", "gat": "Complétez" },
+        { "fr": "Vérifiez si vous avez bien tout compris.", "nl": "Controleer of je alles goed begrepen hebt.", "gat": "Vérifiez" }
+      ]
+    },
+    {
+      "id": "wf11",
+      "nummer": 11,
+      "titel_nl": "Kleding en accessoires",
+      "titel_fr": "Vêtements et accessoires",
+      "woorden": [
+        { "fr": "un vêtement", "nl": "een kledingstuk" },
+        { "fr": "une tenue", "nl": "een outfit" },
+        { "fr": "un pantalon", "nl": "een broek" },
+        { "fr": "une chemise", "nl": "een hemd / blouse" },
+        { "fr": "une robe", "nl": "een jurk" },
+        { "fr": "une jupe", "nl": "een rok" },
+        { "fr": "un pull", "nl": "een trui" },
+        { "fr": "une veste", "nl": "een jasje" },
+        { "fr": "un manteau", "nl": "een mantel / jas" },
+        { "fr": "un imperméable", "nl": "een regenjas" },
+        { "fr": "un costume", "nl": "een kostuum" },
+        { "fr": "des chaussures (f)", "nl": "schoenen" },
+        { "fr": "des baskets (f)", "nl": "sportschoenen" },
+        { "fr": "des bottes (f)", "nl": "laarzen" },
+        { "fr": "des sandales (f)", "nl": "sandalen" },
+        { "fr": "des chaussettes (f)", "nl": "sokken" },
+        { "fr": "des lunettes de soleil", "nl": "een zonnebril" },
+        { "fr": "un sac à main", "nl": "een handtas" },
+        { "fr": "des gants (m)", "nl": "handschoenen" },
+        { "fr": "une écharpe", "nl": "een sjaal" }
+      ],
+      "voorbeelden": [
+        { "fr": "Elle a acheté une robe rouge pour la fête.", "nl": "Ze heeft een rode jurk gekocht voor het feest.", "gat": "robe" },
+        { "fr": "Il a mis ses baskets pour faire du sport.", "nl": "Hij heeft zijn sportschoenen aangedaan om te sporten.", "gat": "baskets" },
+        { "fr": "Elle porte des lunettes de soleil parce qu'il fait très chaud.", "nl": "Ze draagt een zonnebril omdat het heel warm is.", "gat": "lunettes de soleil" }
+      ]
+    },
+    {
+      "id": "wf12",
+      "nummer": 12,
+      "titel_nl": "Kleuren, vormen, materialen",
+      "titel_fr": "Couleurs, formes, matériaux",
+      "woorden": [
+        { "fr": "blanc / blanche", "nl": "wit" },
+        { "fr": "noir / noire", "nl": "zwart" },
+        { "fr": "bleu / bleue", "nl": "blauw" },
+        { "fr": "rouge", "nl": "rood" },
+        { "fr": "jaune", "nl": "geel" },
+        { "fr": "vert / verte", "nl": "groen" },
+        { "fr": "gris / grise", "nl": "grijs" },
+        { "fr": "marron", "nl": "bruin" },
+        { "fr": "clair / claire", "nl": "licht (kleur)" },
+        { "fr": "foncé / foncée", "nl": "donker (kleur)" },
+        { "fr": "un cercle", "nl": "een cirkel" },
+        { "fr": "un carré", "nl": "een vierkant" },
+        { "fr": "un triangle", "nl": "een driehoek" },
+        { "fr": "un rectangle", "nl": "een rechthoek" },
+        { "fr": "le bois", "nl": "het hout" },
+        { "fr": "le métal", "nl": "het metaal" },
+        { "fr": "le verre", "nl": "het glas" },
+        { "fr": "le cuir", "nl": "het leer" },
+        { "fr": "le coton", "nl": "het katoen" },
+        { "fr": "le tissu", "nl": "de stof / het textiel" }
+      ],
+      "voorbeelden": [
+        { "fr": "Le logo est en forme de cercle.", "nl": "Het logo is rond van vorm.", "gat": "cercle" },
+        { "fr": "Cette table est en bois.", "nl": "Deze tafel is van hout.", "gat": "bois" },
+        { "fr": "Il porte une veste en cuir.", "nl": "Hij draagt een leren jasje.", "gat": "cuir" }
+      ]
+    },
+    {
+      "id": "wf13",
+      "nummer": 13,
+      "titel_nl": "Landen en nationaliteiten",
+      "titel_fr": "Pays et nationalités",
+      "woorden": [
+        { "fr": "un pays", "nl": "een land" },
+        { "fr": "une langue", "nl": "een taal" },
+        { "fr": "la Belgique", "nl": "België" },
+        { "fr": "la France", "nl": "Frankrijk" },
+        { "fr": "les Pays-Bas", "nl": "Nederland" },
+        { "fr": "l'Allemagne (f)", "nl": "Duitsland" },
+        { "fr": "l'Espagne (f)", "nl": "Spanje" },
+        { "fr": "l'Italie (f)", "nl": "Italië" },
+        { "fr": "la Suisse", "nl": "Zwitserland" },
+        { "fr": "le Royaume-Uni", "nl": "het Verenigd Koninkrijk" },
+        { "fr": "les États-Unis", "nl": "de Verenigde Staten" },
+        { "fr": "le Canada", "nl": "Canada" },
+        { "fr": "belge", "nl": "Belgisch" },
+        { "fr": "français / française", "nl": "Frans" },
+        { "fr": "néerlandais / néerlandaise", "nl": "Nederlands" },
+        { "fr": "allemand / allemande", "nl": "Duits" },
+        { "fr": "anglais / anglaise", "nl": "Engels" },
+        { "fr": "espagnol / espagnole", "nl": "Spaans" },
+        { "fr": "américain / américaine", "nl": "Amerikaans" },
+        { "fr": "canadien / canadienne", "nl": "Canadees" }
+      ],
+      "voorbeelden": [
+        { "fr": "J'habite en Belgique.", "nl": "Ik woon in België.", "gat": "Belgique" },
+        { "fr": "Elle est française et parle très bien anglais.", "nl": "Zij is Frans en spreekt heel goed Engels.", "gat": "française" },
+        { "fr": "Les États-Unis sont un grand pays.", "nl": "De Verenigde Staten zijn een groot land.", "gat": "pays" }
+      ]
+    },
+    {
+      "id": "wf14",
+      "nummer": 14,
+      "titel_nl": "Onderwijs en vorming",
+      "titel_fr": "Enseignement et formation",
+      "woorden": [
+        { "fr": "l'enseignement (m)", "nl": "het onderwijs" },
+        { "fr": "une école", "nl": "een school" },
+        { "fr": "un / une élève", "nl": "een leerling" },
+        { "fr": "un étudiant / une étudiante", "nl": "een student(e)" },
+        { "fr": "un professeur", "nl": "een leraar" },
+        { "fr": "un cours", "nl": "een les" },
+        { "fr": "une matière", "nl": "een vak" },
+        { "fr": "un emploi du temps", "nl": "een lesrooster" },
+        { "fr": "les devoirs (m)", "nl": "het huiswerk" },
+        { "fr": "un examen", "nl": "een examen" },
+        { "fr": "un bulletin scolaire", "nl": "een rapport" },
+        { "fr": "les résultats (m)", "nl": "de resultaten" },
+        { "fr": "réussir à un examen", "nl": "slagen voor een examen" },
+        { "fr": "échouer à un examen", "nl": "zakken voor een examen" },
+        { "fr": "l'université (f)", "nl": "de universiteit" },
+        { "fr": "un diplôme", "nl": "een diploma" },
+        { "fr": "une bourse d'études", "nl": "een studiebeurs" },
+        { "fr": "l'enseignement en ligne", "nl": "online onderwijs" },
+        { "fr": "un tableau", "nl": "een schoolbord" },
+        { "fr": "une règle", "nl": "een liniaal" }
+      ],
+      "voorbeelden": [
+        { "fr": "Le professeur nous a donné des devoirs à faire pour demain.", "nl": "De leraar heeft ons huiswerk opgegeven voor morgen.", "gat": "devoirs" },
+        { "fr": "Elle a réussi son test de mathématiques.", "nl": "Ze is geslaagd voor haar wiskundetoets.", "gat": "réussi" },
+        { "fr": "Il a terminé ses études à l'université.", "nl": "Hij heeft zijn studie aan de universiteit afgerond.", "gat": "études" }
+      ]
+    },
+    {
+      "id": "wf15",
+      "nummer": 15,
+      "titel_nl": "Persoonlijke gegevens",
+      "titel_fr": "Données personnelles",
+      "woorden": [
+        { "fr": "les informations personnelles", "nl": "persoonlijke gegevens" },
+        { "fr": "un renseignement", "nl": "een inlichting / gegeven" },
+        { "fr": "une identité", "nl": "een identiteit" },
+        { "fr": "un nom de famille", "nl": "een familienaam" },
+        { "fr": "un prénom", "nl": "een voornaam" },
+        { "fr": "un surnom", "nl": "een bijnaam" },
+        { "fr": "naître", "nl": "geboren worden" },
+        { "fr": "la date de naissance", "nl": "de geboortedatum" },
+        { "fr": "le lieu de naissance", "nl": "de geboorteplaats" },
+        { "fr": "un âge", "nl": "een leeftijd" },
+        { "fr": "mineur / majeur", "nl": "minderjarig / meerderjarig" },
+        { "fr": "l'état civil (m)", "nl": "de burgerlijke staat" },
+        { "fr": "célibataire", "nl": "alleenstaand" },
+        { "fr": "une adresse", "nl": "een adres" },
+        { "fr": "la rue", "nl": "de straat" },
+        { "fr": "le code postal", "nl": "de postcode" },
+        { "fr": "un numéro de téléphone", "nl": "een telefoonnummer" },
+        { "fr": "une nationalité", "nl": "een nationaliteit" },
+        { "fr": "un citoyen / une citoyenne", "nl": "een burger" },
+        { "fr": "protéger", "nl": "beschermen" }
+      ],
+      "voorbeelden": [
+        { "fr": "Les informations personnelles doivent être protégées.", "nl": "Persoonlijke gegevens moeten beschermd worden.", "gat": "protégées" },
+        { "fr": "Mon nom est Dupont et mon prénom est Pierre.", "nl": "Mijn naam is Dupont en mijn voornaam is Pierre.", "gat": "prénom" },
+        { "fr": "Je suis né à Bruxelles.", "nl": "Ik ben geboren in Brussel.", "gat": "né" }
+      ]
+    },
+    {
+      "id": "wf16",
+      "nummer": 16,
+      "titel_nl": "Professionele wereld (beroepen)",
+      "titel_fr": "Monde professionnel et métiers",
+      "woorden": [
+        { "fr": "une profession / un métier", "nl": "een beroep" },
+        { "fr": "un emploi", "nl": "een baan" },
+        { "fr": "une carrière", "nl": "een carrière" },
+        { "fr": "une entreprise", "nl": "een bedrijf" },
+        { "fr": "un employeur", "nl": "een werkgever" },
+        { "fr": "un salarié / une salariée", "nl": "een werknemer" },
+        { "fr": "un collègue", "nl": "een collega" },
+        { "fr": "un entretien d'embauche", "nl": "een sollicitatiegesprek" },
+        { "fr": "une lettre de motivation", "nl": "een sollicitatiebrief" },
+        { "fr": "un salaire", "nl": "een salaris" },
+        { "fr": "un contrat", "nl": "een contract" },
+        { "fr": "une promotion", "nl": "een promotie" },
+        { "fr": "à temps plein", "nl": "voltijds" },
+        { "fr": "à temps partiel", "nl": "deeltijds" },
+        { "fr": "le chômage", "nl": "de werkloosheid" },
+        { "fr": "un avocat / une avocate", "nl": "een advocaat" },
+        { "fr": "un infirmier / une infirmière", "nl": "een verpleegkundige" },
+        { "fr": "un ingénieur", "nl": "een ingenieur" },
+        { "fr": "un directeur / une directrice", "nl": "een directeur / directrice" },
+        { "fr": "une journée de travail", "nl": "een werkdag" }
+      ],
+      "voorbeelden": [
+        { "fr": "Je travaille dans une entreprise internationale.", "nl": "Ik werk in een internationaal bedrijf.", "gat": "entreprise" },
+        { "fr": "Il cherche un emploi dans le secteur de la santé.", "nl": "Hij zoekt werk in de gezondheidssector.", "gat": "emploi" },
+        { "fr": "Mon père est médecin et ma mère est infirmière.", "nl": "Mijn vader is arts en mijn moeder is verpleegster.", "gat": "infirmière" }
+      ]
+    },
+    {
+      "id": "wf17",
+      "nummer": 17,
+      "titel_nl": "Sport en ontspanning",
+      "titel_fr": "Sport et loisirs",
+      "woorden": [
+        { "fr": "les loisirs (m)", "nl": "de vrijetijdsbesteding" },
+        { "fr": "un passe-temps", "nl": "een hobby" },
+        { "fr": "un entraînement", "nl": "een training" },
+        { "fr": "s'entraîner", "nl": "trainen" },
+        { "fr": "une compétition", "nl": "een competitie" },
+        { "fr": "un match", "nl": "een wedstrijd" },
+        { "fr": "une équipe", "nl": "een team" },
+        { "fr": "un joueur / une joueuse", "nl": "een speler / speelster" },
+        { "fr": "un entraîneur", "nl": "een trainer" },
+        { "fr": "un arbitre", "nl": "een scheidsrechter" },
+        { "fr": "un championnat", "nl": "een kampioenschap" },
+        { "fr": "une victoire", "nl": "een overwinning" },
+        { "fr": "une défaite", "nl": "een nederlaag" },
+        { "fr": "une médaille", "nl": "een medaille" },
+        { "fr": "marquer un but", "nl": "een doelpunt scoren" },
+        { "fr": "un stade", "nl": "een stadion" },
+        { "fr": "la natation", "nl": "het zwemmen" },
+        { "fr": "faire une balade", "nl": "een wandeling maken" },
+        { "fr": "se divertir", "nl": "zich vermaken" },
+        { "fr": "se blesser", "nl": "zich verwonden" }
+      ],
+      "voorbeelden": [
+        { "fr": "Les athlètes s'entraînent durement pour les compétitions.", "nl": "De atleten trainen hard voor de competities.", "gat": "entraînent" },
+        { "fr": "Il a gagné une médaille d'or au championnat.", "nl": "Hij heeft een gouden medaille gewonnen op het kampioenschap.", "gat": "médaille" },
+        { "fr": "Elle pratique la natation pour se maintenir en forme.", "nl": "Zij zwemt om fit te blijven.", "gat": "natation" }
+      ]
+    },
+    {
+      "id": "wf18",
+      "nummer": 18,
+      "titel_nl": "Transportmiddelen",
+      "titel_fr": "Moyens de transport",
+      "woorden": [
+        { "fr": "un moyen de transport", "nl": "een vervoermiddel" },
+        { "fr": "le transport public", "nl": "het openbaar vervoer" },
+        { "fr": "un trajet", "nl": "een traject / rit" },
+        { "fr": "un itinéraire", "nl": "een route" },
+        { "fr": "un horaire", "nl": "een dienstregeling" },
+        { "fr": "un billet aller-retour", "nl": "een retourticket" },
+        { "fr": "une correspondance", "nl": "een aansluiting / overstap" },
+        { "fr": "une gare", "nl": "een station" },
+        { "fr": "un arrêt de bus", "nl": "een bushalte" },
+        { "fr": "un passager / une passagère", "nl": "een passagier" },
+        { "fr": "un conducteur / une conductrice", "nl": "een bestuurder / chauffeur" },
+        { "fr": "un départ", "nl": "een vertrek" },
+        { "fr": "une arrivée", "nl": "een aankomst" },
+        { "fr": "un retard", "nl": "een vertraging" },
+        { "fr": "une annulation", "nl": "een annulering" },
+        { "fr": "une voiture", "nl": "een auto" },
+        { "fr": "un train", "nl": "een trein" },
+        { "fr": "un avion", "nl": "een vliegtuig" },
+        { "fr": "une ceinture de sécurité", "nl": "een veiligheidsgordel" },
+        { "fr": "conduire", "nl": "rijden / besturen" }
+      ],
+      "voorbeelden": [
+        { "fr": "Nous avons un billet aller-retour pour Paris.", "nl": "We hebben een retourticket voor Parijs.", "gat": "aller-retour" },
+        { "fr": "Il y a une correspondance à la gare de Lyon.", "nl": "Er is een aansluiting op het station van Lyon.", "gat": "correspondance" },
+        { "fr": "Il faut toujours mettre sa ceinture de sécurité en voiture.", "nl": "Je moet altijd je veiligheidsgordel omdoen in de auto.", "gat": "ceinture de sécurité" }
+      ]
+    },
+    {
+      "id": "wf19",
+      "nummer": 19,
+      "titel_nl": "Uur en plaats",
+      "titel_fr": "Heure et lieu",
+      "woorden": [
+        { "fr": "une heure", "nl": "een uur" },
+        { "fr": "midi", "nl": "twaalf uur 's middags" },
+        { "fr": "minuit", "nl": "middernacht" },
+        { "fr": "une demi-heure", "nl": "een half uur" },
+        { "fr": "un quart d'heure", "nl": "een kwartier" },
+        { "fr": "bientôt", "nl": "binnenkort" },
+        { "fr": "tôt", "nl": "vroeg" },
+        { "fr": "tard", "nl": "laat" },
+        { "fr": "hier", "nl": "gisteren" },
+        { "fr": "demain", "nl": "morgen" },
+        { "fr": "le matin", "nl": "de ochtend" },
+        { "fr": "l'après-midi", "nl": "de namiddag" },
+        { "fr": "à côté de", "nl": "naast" },
+        { "fr": "en face de", "nl": "tegenover" },
+        { "fr": "entre", "nl": "tussen" },
+        { "fr": "à gauche de", "nl": "links van" },
+        { "fr": "à droite de", "nl": "rechts van" },
+        { "fr": "près de", "nl": "dicht bij" },
+        { "fr": "au-dessus de", "nl": "boven" },
+        { "fr": "à l'extérieur", "nl": "buiten" }
+      ],
+      "voorbeelden": [
+        { "fr": "L'avion part dans une demi-heure.", "nl": "Het vliegtuig vertrekt over een half uur.", "gat": "demi-heure" },
+        { "fr": "L'école est à côté du parc.", "nl": "De school is naast het park.", "gat": "à côté" },
+        { "fr": "Le musée est situé en face de l'église.", "nl": "Het museum ligt tegenover de kerk.", "gat": "en face" }
+      ]
+    },
+    {
+      "id": "wf20",
+      "nummer": 20,
+      "titel_nl": "Vakantie, reizen",
+      "titel_fr": "Vacances et voyages",
+      "woorden": [
+        { "fr": "les vacances (f)", "nl": "de vakantie" },
+        { "fr": "un voyage", "nl": "een reis" },
+        { "fr": "une destination", "nl": "een bestemming" },
+        { "fr": "un séjour", "nl": "een verblijf" },
+        { "fr": "une réservation", "nl": "een reservering" },
+        { "fr": "un guide touristique", "nl": "een reisgids" },
+        { "fr": "les bagages (m)", "nl": "de bagage" },
+        { "fr": "une valise", "nl": "een koffer" },
+        { "fr": "un passeport", "nl": "een paspoort" },
+        { "fr": "une assurance voyage", "nl": "een reisverzekering" },
+        { "fr": "un vol direct", "nl": "een rechtstreekse vlucht" },
+        { "fr": "une escale", "nl": "een tussenstop" },
+        { "fr": "la porte d'embarquement", "nl": "de boardingpoort" },
+        { "fr": "l'atterrissage (m)", "nl": "de landing" },
+        { "fr": "une frontière", "nl": "een grens" },
+        { "fr": "une chambre individuelle", "nl": "een eenpersoonskamer" },
+        { "fr": "la plage", "nl": "het strand" },
+        { "fr": "la montagne", "nl": "de berg(en)" },
+        { "fr": "réserver", "nl": "boeken / reserveren" },
+        { "fr": "enregistrer", "nl": "inchecken / registreren" }
+      ],
+      "voorbeelden": [
+        { "fr": "Nous avons réservé un séjour à Paris pour deux semaines.", "nl": "We hebben een verblijf in Parijs geboekt voor twee weken.", "gat": "séjour" },
+        { "fr": "Les bagages doivent être enregistrés à la porte d'embarquement.", "nl": "De bagage moet worden ingecheckt bij de boardingpoort.", "gat": "bagages" },
+        { "fr": "Le vol est retardé à cause du mauvais temps.", "nl": "De vlucht is vertraagd door het slechte weer.", "gat": "retardé" }
+      ]
+    },
+    {
+      "id": "wf21",
+      "nummer": 21,
+      "titel_nl": "Weer",
+      "titel_fr": "La météo",
+      "woorden": [
+        { "fr": "le temps", "nl": "het weer" },
+        { "fr": "le climat", "nl": "het klimaat" },
+        { "fr": "la météo", "nl": "de weersvoorspelling" },
+        { "fr": "une température", "nl": "een temperatuur" },
+        { "fr": "un degré", "nl": "een graad" },
+        { "fr": "la chaleur", "nl": "de hitte" },
+        { "fr": "le froid", "nl": "de kou" },
+        { "fr": "le vent", "nl": "de wind" },
+        { "fr": "le brouillard", "nl": "de mist" },
+        { "fr": "le ciel", "nl": "de lucht" },
+        { "fr": "un nuage", "nl": "een wolk" },
+        { "fr": "un orage", "nl": "een onweersbui" },
+        { "fr": "une tempête", "nl": "een storm" },
+        { "fr": "la pluie", "nl": "de regen" },
+        { "fr": "une averse", "nl": "een bui" },
+        { "fr": "la neige", "nl": "de sneeuw" },
+        { "fr": "un arc-en-ciel", "nl": "een regenboog" },
+        { "fr": "ensoleillé(e)", "nl": "zonnig" },
+        { "fr": "nuageux / nuageuse", "nl": "bewolkt" },
+        { "fr": "pluvieux / pluvieuse", "nl": "regenachtig" }
+      ],
+      "voorbeelden": [
+        { "fr": "Le temps est ensoleillé aujourd'hui.", "nl": "Het is zonnig vandaag.", "gat": "ensoleillé" },
+        { "fr": "Il y a un arc-en-ciel dans le ciel après la pluie.", "nl": "Er is een regenboog in de lucht na de regen.", "gat": "arc-en-ciel" },
+        { "fr": "Aujourd'hui, il y a un ciel couvert et il pleut un peu.", "nl": "Vandaag is de lucht bewolkt en het regent een beetje.", "gat": "pleut" }
+      ]
+    },
+    {
+      "id": "wf22",
+      "nummer": 22,
+      "titel_nl": "Winkels en diensten",
+      "titel_fr": "Magasins et services",
+      "woorden": [
+        { "fr": "un magasin", "nl": "een winkel" },
+        { "fr": "une boutique", "nl": "een boetiek" },
+        { "fr": "un supermarché", "nl": "een supermarkt" },
+        { "fr": "un centre commercial", "nl": "een winkelcentrum" },
+        { "fr": "une boulangerie", "nl": "een bakkerij" },
+        { "fr": "une boucherie", "nl": "een slagerij" },
+        { "fr": "une librairie", "nl": "een boekenwinkel" },
+        { "fr": "un fleuriste", "nl": "een bloemenwinkel" },
+        { "fr": "un rayon", "nl": "een afdeling (in winkel)" },
+        { "fr": "une vitrine", "nl": "een etalage" },
+        { "fr": "un prix réduit", "nl": "een verlaagde prijs" },
+        { "fr": "une promotion", "nl": "een aanbieding" },
+        { "fr": "un rabais", "nl": "een korting" },
+        { "fr": "la caisse", "nl": "de kassa" },
+        { "fr": "une carte bancaire", "nl": "een bankkaart" },
+        { "fr": "un reçu", "nl": "een kassabon" },
+        { "fr": "un client / une cliente", "nl": "een klant" },
+        { "fr": "faire des achats", "nl": "boodschappen doen / winkelen" },
+        { "fr": "payer", "nl": "betalen" },
+        { "fr": "la livraison", "nl": "de levering / bezorging" }
+      ],
+      "voorbeelden": [
+        { "fr": "Cette boutique vend des vêtements à prix réduit.", "nl": "Deze boetiek verkoopt kleding tegen verlaagde prijzen.", "gat": "prix réduit" },
+        { "fr": "J'ai payé à la caisse avec ma carte bancaire.", "nl": "Ik heb aan de kassa betaald met mijn bankkaart.", "gat": "caisse" },
+        { "fr": "Je vais à la boulangerie pour acheter du pain.", "nl": "Ik ga naar de bakkerij om brood te kopen.", "gat": "boulangerie" }
+      ]
+    },
+    {
+      "id": "wf23",
+      "nummer": 23,
+      "titel_nl": "Woning: meubels, uitrusting",
+      "titel_fr": "Logement, meubles et équipement",
+      "woorden": [
+        { "fr": "un logement", "nl": "een woning" },
+        { "fr": "un appartement", "nl": "een appartement" },
+        { "fr": "une chambre à coucher", "nl": "een slaapkamer" },
+        { "fr": "un salon", "nl": "een woonkamer" },
+        { "fr": "une cuisine", "nl": "een keuken" },
+        { "fr": "une salle de bains", "nl": "een badkamer" },
+        { "fr": "un étage", "nl": "een verdieping" },
+        { "fr": "un escalier", "nl": "een trap" },
+        { "fr": "un grenier", "nl": "een zolder" },
+        { "fr": "un jardin", "nl": "een tuin" },
+        { "fr": "un canapé", "nl": "een zetel / bank" },
+        { "fr": "un fauteuil", "nl": "een leunstoel" },
+        { "fr": "une armoire", "nl": "een kast" },
+        { "fr": "une étagère", "nl": "een plank / rek" },
+        { "fr": "un oreiller", "nl": "een hoofdkussen" },
+        { "fr": "un réfrigérateur", "nl": "een koelkast" },
+        { "fr": "un four", "nl": "een oven" },
+        { "fr": "un lave-vaisselle", "nl": "een vaatwasser" },
+        { "fr": "une machine à laver", "nl": "een wasmachine" },
+        { "fr": "spacieux / spacieuse", "nl": "ruim" }
+      ],
+      "voorbeelden": [
+        { "fr": "L'appartement a trois chambres à coucher et un salon spacieux.", "nl": "Het appartement heeft drie slaapkamers en een ruime woonkamer.", "gat": "spacieux" },
+        { "fr": "Elle a acheté une armoire à vêtements pour la chambre.", "nl": "Ze heeft een kledingkast gekocht voor de slaapkamer.", "gat": "armoire" },
+        { "fr": "La cuisine est équipée d'un four moderne et d'un lave-vaisselle.", "nl": "De keuken is uitgerust met een moderne oven en een vaatwasser.", "gat": "lave-vaisselle" }
+      ]
+    }
+  ],
+  "grammatica": [
+    {
+      "pijler": "woordsoorten",
+      "titel": "Woordsoorten",
+      "onderdelen": [
+        {
+          "id": "gr01",
+          "naam": "Lidwoorden (défini, indéfini, contracté, partitif & 'de')",
+          "uitleg": "Gebruik le/la/les (bepaald), un/une/des (onbepaald), au/aux/du/des (samengetrokken) en du/de la/de l'/des (deelaanduidend). Let op: na een ontkenning (pas de), een hoeveelheid (beaucoup de) en vóór een bijvoeglijk naamwoord in het meervoud (de bons amis) wordt het lidwoord 'de'.",
+          "voorbeelden": [
+            { "fr": "Je ne bois pas de café le soir.", "nl": "Ik drink 's avonds geen koffie.", "gat": "de" },
+            { "fr": "Nous mangeons du pain et de la confiture.", "nl": "Wij eten brood en confituur.", "gat": "du" }
+          ]
+        },
+        {
+          "id": "gr02",
+          "naam": "Déterminants (aanwijzend, bezittelijk, vragend, onbepaald)",
+          "uitleg": "Aanwijzend: ce/cet (m, voor klinker/doffe h), cette (v), ces (mv). Bezittelijk: mon/ma/mes... (vóór een vrouwelijk woord dat begint met een klinker gebruik je mon/ton/son, bv. mon amie). Vragend: quel/quelle/quels/quelles. Onbepaald: tout/toute/tous/toutes.",
+          "voorbeelden": [
+            { "fr": "Cet appartement est très lumineux.", "nl": "Dit appartement is erg licht.", "gat": "Cet" },
+            { "fr": "Quelle matière préfères-tu à l'école ?", "nl": "Welk vak verkies je op school?", "gat": "Quelle" }
+          ]
+        },
+        {
+          "id": "gr03",
+          "naam": "Persoonlijke voornaamwoorden (COD, COI, y, en)",
+          "uitleg": "Vervangen herhalingen en staan vóór de persoonsvorm (of vóór de infinitief): COD (le/la/les), COI (lui/leur), plaats of à + zaak (y), hoeveelheid of de + zaak (en). Volgorde bij combinaties: me/te/nous/vous → le/la/les → lui/leur → y → en.",
+          "voorbeelden": [
+            { "fr": "Je connais ce film et je le recommande.", "nl": "Ik ken deze film en ik raad hem aan.", "gat": "le" },
+            { "fr": "Tu vas à Paris ? Oui, j'y vais demain.", "nl": "Ga je naar Parijs? Ja, ik ga er morgen naartoe.", "gat": "y" }
+          ]
+        },
+        {
+          "id": "gr04",
+          "naam": "Betrekkelijke voornaamwoorden (qui, que, dont, où)",
+          "uitleg": "Verbinden een bijzin met het antecedent: qui = onderwerp, que (qu') = lijdend voorwerp, dont = vervangt 'de + ...' (waarvan/over wie), où = plaats of tijd (waar/wanneer).",
+          "voorbeelden": [
+            { "fr": "C'est le livre dont je t'ai parlé hier.", "nl": "Dat is het boek waarover ik je gisteren vertelde.", "gat": "dont" },
+            { "fr": "Voici la ville où je suis né.", "nl": "Hier is de stad waar ik geboren ben.", "gat": "où" }
+          ]
+        },
+        {
+          "id": "gr05",
+          "naam": "Bijvoeglijk naamwoord (plaats, trappen) & bijwoord (-ment)",
+          "uitleg": "Meeste bijvoeglijke naamwoorden staan achter het zelfstandig naamwoord; korte frequente (petit, grand, bon, beau, jeune, vieux, nouveau) staan ervoor. Vergelijking: plus/aussi/moins ... que (bon → meilleur). Bijwoorden van wijze vorm je meestal uit de vrouwelijke vorm + -ment (lent → lentement).",
+          "voorbeelden": [
+            { "fr": "Ce film est meilleur que le premier.", "nl": "Deze film is beter dan de eerste.", "gat": "meilleur" },
+            { "fr": "Elle explique la règle très clairement.", "nl": "Ze legt de regel heel duidelijk uit.", "gat": "clairement" }
+          ]
+        },
+        {
+          "id": "gr06",
+          "naam": "Voorzetsels (landen, vervoer, oorzaak) & voegwoorden",
+          "uitleg": "Landen: en + vrouwelijk land of klinker (en France, en Espagne), au + mannelijk land (au Canada), aux + meervoud (aux Pays-Bas). Vervoer: en (binnenin: en train, en voiture), à (op/te: à vélo, à pied). Oorzaak: grâce à (positief) vs. à cause de (negatief).",
+          "voorbeelden": [
+            { "fr": "Nous partons en France en train cet été.", "nl": "We vertrekken deze zomer met de trein naar Frankrijk.", "gat": "en" },
+            { "fr": "Le match est annulé à cause de la pluie.", "nl": "De wedstrijd is afgelast door de regen.", "gat": "à cause de" }
+          ]
+        }
+      ]
+    },
+    {
+      "pijler": "tijden_wijzen",
+      "titel": "Tijden en wijzen (Werkwoorden)",
+      "onderdelen": [
+        {
+          "id": "gr07",
+          "naam": "Indicatif présent & wederkerende werkwoorden",
+          "uitleg": "Regelmatige werkwoorden op -er (-e, -es, -e, -ons, -ez, -ent), -ir type finir (-is, -is, -it, -issons, -issez, -issent) en frequente onregelmatige (être, avoir, aller, faire, pouvoir, vouloir, devoir, prendre). Wederkerende werkwoorden krijgen me/te/se/nous/vous/se.",
+          "voorbeelden": [
+            { "fr": "Nous finissons toujours nos devoirs avant le dîner.", "nl": "We maken ons huiswerk altijd af voor het avondeten.", "gat": "finissons" },
+            { "fr": "Ils se lèvent tôt pendant la semaine.", "nl": "Zij staan door de week vroeg op.", "gat": "lèvent" }
+          ]
+        },
+        {
+          "id": "gr08",
+          "naam": "Verleden tijd: passé composé, imparfait, plus-que-parfait, passé récent",
+          "uitleg": "Passé composé (avoir/être + VD) voor afgeronde acties/gebeurtenissen. Imparfait (stam nous-vorm + -ais/-ais/-ait/-ions/-iez/-aient; être: ét-) voor beschrijvingen, gewoonten en achtergrond. Plus-que-parfait (imparfait van avoir/être + VD) voor wat nog eerder gebeurde. Passé récent: venir de + infinitief.",
+          "voorbeelden": [
+            { "fr": "Quand il faisait beau, nous allions souvent à la plage.", "nl": "Toen het mooi weer was, gingen we vaak naar het strand.", "gat": "faisait" },
+            { "fr": "Hier, j'ai visité un musée très intéressant.", "nl": "Gisteren heb ik een heel interessant museum bezocht.", "gat": "visité" }
+          ]
+        },
+        {
+          "id": "gr09",
+          "naam": "Toekomst: futur proche & futur simple",
+          "uitleg": "Futur proche (aller in présent + infinitief) voor nabije of geplande toekomst. Futur simple (infinitief + -ai, -as, -a, -ons, -ez, -ont; onregelmatige stammen: ser-, aur-, ir-, fer-, pourr-, voudr-) voor latere toekomst of beloften.",
+          "voorbeelden": [
+            { "fr": "Demain, je vais préparer ma présentation.", "nl": "Morgen ga ik mijn presentatie voorbereiden.", "gat": "vais" },
+            { "fr": "L'année prochaine, nous irons en Italie.", "nl": "Volgend jaar zullen we naar Italië gaan.", "gat": "irons" }
+          ]
+        },
+        {
+          "id": "gr10",
+          "naam": "Conditionnel présent (beleefdheid, advies, hypothese)",
+          "uitleg": "Vorming: stam van de futur simple + uitgangen van de imparfait (-ais, -ais, -ait, -ions, -iez, -aient). Gebruikt voor beleefde vragen (conditionnel de politesse: pourriez-vous, je voudrais), raad (tu devrais) en wensen.",
+          "voorbeelden": [
+            { "fr": "Pourriez-vous me donner plus d'informations ?", "nl": "Zou u mij meer informatie kunnen geven?", "gat": "Pourriez" },
+            { "fr": "Je voudrais réserver une chambre pour deux nuits.", "nl": "Ik zou graag een kamer willen reserveren voor twee nachten.", "gat": "voudrais" }
+          ]
+        },
+        {
+          "id": "gr11",
+          "naam": "Subjonctif présent & impératif",
+          "uitleg": "Subjonctif (stam ils-vorm présent + -e, -es, -e, -ions, -iez, -ent; onr. sois, aie, fasse, aille, puisse) gebruik je na wil, gevoel, noodzaak of twijfel (il faut que, je suis content que, je voudrais que, bien que). Impératif (bevel/advies) heeft geen onderwerp (Parle ! Finissons ! Prenez !).",
+          "voorbeelden": [
+            { "fr": "Il faut que tu fasses attention aux accords.", "nl": "Je moet opletten voor de vervoegingen/congruentie.", "gat": "fasses" },
+            { "fr": "Je suis content que vous soyez ici aujourd'hui.", "nl": "Ik ben blij dat jullie vandaag hier zijn.", "gat": "soyez" }
+          ]
+        }
+      ]
+    },
+    {
+      "pijler": "zinsbouw",
+      "titel": "Zinsbouw",
+      "onderdelen": [
+        {
+          "id": "gr12",
+          "naam": "Soorten zinnen (vragend, ontkennend, bevelend, uitroepend)",
+          "uitleg": "Vragen: intonatie, Est-ce que ... ?, of inversie (Avez-vous... ?). Ontkenning omsluit de persoonsvorm: ne ... pas, ne ... jamais, ne ... plus, ne ... rien, ne ... personne. Uitroepend: Quel(le) ... ! / Comme ... !",
+          "voorbeelden": [
+            { "fr": "Je ne mange jamais de viande le lundi.", "nl": "Ik eet op maandag nooit vlees.", "gat": "jamais" },
+            { "fr": "Est-ce que tu as compris la consigne ?", "nl": "Heb je de opdracht begrepen?", "gat": "Est-ce que" }
+          ]
+        },
+        {
+          "id": "gr13",
+          "naam": "Samengestelde zinnen & voorwaardelijke zinnen (si)",
+          "uitleg": "Verbind zinnen met nevenschikkende (mais, ou, et, donc, car) of onderschikkende voegwoorden (parce que, quand, bien que). Voorwaardelijke zinnen: si + indicatif présent → présent/futur/impératif; si + indicatif imparfait → conditionnel présent.",
+          "voorbeelden": [
+            { "fr": "Si tu étudies régulièrement, tu réussiras ton examen.", "nl": "Als je regelmatig studeert, zul je slagen voor je examen.", "gat": "réussiras" },
+            { "fr": "Si j'avais plus de temps, je voyagerais davantage.", "nl": "Als ik meer tijd had, zou ik meer reizen.", "gat": "voyagerais" }
+          ]
+        },
+        {
+          "id": "gr14",
+          "naam": "Zinsdelen (sujet, verbe conjugué, COD, COI)",
+          "uitleg": "Basisvolgorde in een mededelende Franse zin: onderwerp (sujet) + persoonsvorm (verbe conjugué) + lijdend voorwerp (COD: qui/quoi?) + meewerkend voorwerp (COI: à qui/à quoi?).",
+          "voorbeelden": [
+            { "fr": "Le professeur explique la leçon aux élèves.", "nl": "De leraar legt de les uit aan de leerlingen.", "gat": "aux élèves" },
+            { "fr": "Elle envoie une lettre de motivation au directeur.", "nl": "Ze stuurt een motivatiebrief naar de directeur.", "gat": "une lettre" }
+          ]
+        }
+      ]
+    },
+    {
+      "pijler": "congruentie",
+      "titel": "Congruentie (Accord)",
+      "onderdelen": [
+        {
+          "id": "gr15",
+          "naam": "Onderwerp – persoonsvorm (accord du verbe)",
+          "uitleg": "De persoonsvorm past zich altijd aan in persoon en getal aan het onderwerp (sujet), ook wanneer er een tussenstuk tussen staat of bij een samengesteld onderwerp (moi et toi = nous; Paul et Marie = ils).",
+          "voorbeelden": [
+            { "fr": "Les étudiants de cette école travaillent très bien.", "nl": "De studenten van deze school werken heel goed.", "gat": "travaillent" },
+            { "fr": "Mon frère et moi aimons faire du sport.", "nl": "Mijn broer en ik houden ervan om te sporten.", "gat": "aimons" }
+          ]
+        },
+        {
+          "id": "gr16",
+          "naam": "Zelfstandig naamwoord – bijvoeglijk naamwoord (accord de l'adjectif)",
+          "uitleg": "Het bijvoeglijk naamwoord past zich aan in geslacht (m/v: meestal +e) en getal (ev/mv: meestal +s) aan het zelfstandig naamwoord of voornaamwoord waarbij het hoort. Let op uitzonderingen (-eux → -euse, -if → -ive, -el → -elle).",
+          "voorbeelden": [
+            { "fr": "Nous avons visité de belles villes historiques.", "nl": "We hebben mooie historische steden bezocht.", "gat": "belles" },
+            { "fr": "Ma sœur est très sportive et créative.", "nl": "Mijn zus is heel sportief en creatief.", "gat": "sportive" }
+          ]
+        },
+        {
+          "id": "gr17",
+          "naam": "Voltooid deelwoord met être (accord du participe passé)",
+          "uitleg": "Bij werkwoorden vervoegd met être (aller, venir, arriver, partir, entrer, sortir, monter, descendre, rester, tomber, naître, mourir, devenir, en wederkerende werkwoorden) past het voltooid deelwoord zich in geslacht en getal aan het onderwerp aan (+e, +s, +es).",
+          "voorbeelden": [
+            { "fr": "Elle est partie en vacances avec ses amies.", "nl": "Zij is met haar vriendinnen op vakantie vertrokken.", "gat": "partie" },
+            { "fr": "Mes parents sont arrivés à la gare à midi.", "nl": "Mijn ouders zijn om twaalf uur op het station aangekomen.", "gat": "arrivés" }
+          ]
+        }
+      ]
+    }
+  ]
+}
