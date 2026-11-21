@@ -3452,8 +3452,24 @@ function renderSpeakingArchive() {
   }).join("")}</div>`;
 }
 
+function renderSpeakHttpsHint() {
+  const el = document.getElementById("speak-https-hint");
+  if (!el) return;
+  if (window.isSecureContext || !App.config?.httpsEnabled) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  const host = App.config.httpsHostname || window.location.hostname || "homeassistant.local";
+  const port = App.config.httpsPort || 8443;
+  const httpsUrl = `https://${host}:${port}/`;
+  el.innerHTML = `<span>🎙️ <strong>Microfoon via HTTP geblokkeerd door de browser.</strong> Open <a href="${escapeHtml(httpsUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(httpsUrl)}</a> (eenmalig lokaal certificaat accepteren) voor directe spraakopname, of gebruik <em>Audio uploaden</em> / tekstinvoer.</span>`;
+  el.classList.remove("hidden");
+}
+
 function renderSpeakingModule() {
   if (!App.curriculum) return;
+  renderSpeakHttpsHint();
   renderSpeakingModeBar();
   renderSpeakingArchive();
   const ws = document.getElementById("speak-workspace");

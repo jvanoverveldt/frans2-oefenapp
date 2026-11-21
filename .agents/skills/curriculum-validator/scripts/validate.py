@@ -1,6 +1,8 @@
 import json, os, sys
 
-with open("curriculum.json", encoding="utf-8") as f:
+CURRICULUM_PATH = "frans2_oefenapp/curriculum.json" if os.path.isfile("frans2_oefenapp/curriculum.json") else "curriculum.json"
+
+with open(CURRICULUM_PATH, encoding="utf-8") as f:
     d = json.load(f)
 
 errs = []
@@ -59,7 +61,7 @@ if errs:
         print(" -", e)
     sys.exit(1)
 
-sz = os.path.getsize("curriculum.json")
+sz = os.path.getsize(CURRICULUM_PATH)
 n_words = sum(len(x["woorden"]) for x in wf)
 n_wf_vb = sum(len(x["voorbeelden"]) for x in wf)
 n_gr = sum(len(g["onderdelen"]) for g in gr)
