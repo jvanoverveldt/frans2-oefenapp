@@ -2063,6 +2063,123 @@ body {
   50% { box-shadow: 0 0 0 9px rgba(225, 29, 72, 0.08); }
 }
 
+/* Tab 5b: Grammar Coach & Teacher Panel */
+.gr-question-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.gr-q-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+
+.gr-q-card.verdict-juist {
+  border-color: #a7f3d0;
+  background: #f6fef9;
+}
+
+.gr-q-card.verdict-bijna {
+  border-color: #fcd34d;
+  background: var(--warn-soft);
+}
+
+.gr-q-card.verdict-fout {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.gr-q-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+
+.gr-type-tag {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.gr-q-prompt {
+  font-weight: 600;
+  font-size: 0.96rem;
+  margin: 0 0 0.35rem;
+}
+
+.gr-q-context {
+  font-size: 0.94rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  margin: 0.35rem 0 0.65rem;
+}
+
+.gr-q-feedback {
+  margin-top: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+.weak-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.weak-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.teacher-focus-banner {
+  padding: 0.65rem 0.85rem;
+  border-radius: 9px;
+  background: var(--primary-soft);
+  border: 1px solid #bfdbfe;
+  font-size: 0.86rem;
+  margin-bottom: 0.85rem;
+}
+
+.custom-ex-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-alt);
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.75rem;
+}
+
 @media (max-width: 900px) {
   .write-grid.with-helper {
     grid-template-columns: 1fr;

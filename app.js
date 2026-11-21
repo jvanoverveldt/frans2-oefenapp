@@ -63,6 +63,18 @@ const App = {
     dialogue: null,
     openArchiveId: null,
   },
+  grammar: {
+    pillar: "__all",
+    topicId: "gr01",
+    mode: "ai_coach", // "ai_coach" | "basis" | "theorie" | "leerkracht"
+    exerciseType: "mix",
+    count: 5,
+    loading: false,
+    evaluating: false,
+    activeInputId: null,
+    session: null,
+    offlineSession: null,
+  },
 };
 
 function defaultProgress() {
@@ -71,6 +83,8 @@ function defaultProgress() {
     updatedAt: null,
     woordvelden: {},
     grammatica: {},
+    customGrammar: {},
+    grammaticaArchief: [],
     evaluaties: [],
     zwakkePunten: [],
     schrijfConcept: null,
@@ -85,6 +99,8 @@ function normalizeProgress(raw) {
     updatedAt: raw.updatedAt || null,
     woordvelden: raw.woordvelden && typeof raw.woordvelden === "object" ? raw.woordvelden : {},
     grammatica: raw.grammatica && typeof raw.grammatica === "object" ? raw.grammatica : {},
+    customGrammar: raw.customGrammar && typeof raw.customGrammar === "object" ? raw.customGrammar : {},
+    grammaticaArchief: Array.isArray(raw.grammaticaArchief) ? raw.grammaticaArchief : [],
     evaluaties: Array.isArray(raw.evaluaties) ? raw.evaluaties : [],
     zwakkePunten: Array.isArray(raw.zwakkePunten) ? raw.zwakkePunten : [],
     schrijfConcept: raw.schrijfConcept && typeof raw.schrijfConcept === "object" ? raw.schrijfConcept : null,
@@ -309,13 +325,25 @@ function computeWfMetrics(wf) {
 
 function computeGrMetrics(id) {
   const raw = App.progress.grammatica[id] || {};
-  const attempts = Number(raw.attempts) || 0;
-  const score = raw.score ?? null;
+  const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+  const offlineCount = Number(raw.offlineCount) || 0;
+  const attempts = sessions.length + offlineCount;
+  const goodDays = new Set(sessions.filter((s) => Number(s.scorePct) >= 75).map((s) => s.dayKey));
+  const lastScore = sessions.length ? sessions[sessions.length - 1].scorePct : null;
+  const weakPoints = Array.isArray(raw.weakPoints) ? raw.weakPoints : [];
+
   let status = "niet_gestart";
   if (attempts > 0) {
-    status = score !== null && score >= 80 && attempts >= 2 ? "beheerst" : "oefenen";
+    status = goodDays.size >= 2 ? "beheerst" : "oefenen";
   }
-  return { status, score, attempts };
+  return {
+    status,
+    score: lastScore,
+    attempts,
+    aiSessions: sessions.length,
+    goodDaysCount: goodDays.size,
+    weakPoints,
+  };
 }
 
 function getDomainStats(domain) {
@@ -573,6 +601,8 @@ function switchSubtab(subtabId) {
   document.querySelectorAll(".subtab-panel").forEach((p) => {
     p.classList.toggle("active", p.id === `subtab-${subtabId}`);
   });
+  if (subtabId === "vocab") renderVocabStage();
+  if (subtabId === "grammar") renderGrammarStage();
 }
 
 /* ---------- Tab 1: Dashboard (100% automatisch berekend) ---------- */
@@ -693,18 +723,19 @@ function renderDashboard() {
     : `<div class="card muted">Geen woordvelden gevonden voor deze filter.</div>`;
 
   document.getElementById("gr-summary-text").textContent =
-    `${grMastered} van ${grAll.length} onderdelen beheerst (automatisch bepaald op basis van resultaten)`;
+    `${grMastered} van ${grAll.length} onderdelen beheerst (2 dagen op niveau Goed of hoger)`;
 
   document.getElementById("dashboard-gr-pillars").innerHTML = App.curriculum.grammatica.map((p) => {
     const doneCount = p.onderdelen.filter((o) => computeGrMetrics(o.id).status === "beheerst").length;
     const items = p.onderdelen.map((o) => {
       const m = computeGrMetrics(o.id);
-      const scoreTxt = m.score !== null ? ` (${m.score}%)` : "";
+      const badgeHtml = m.score !== null ? renderCategoryBadge(m.score) : `<span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>`;
+      const daysHint = m.status === "oefenen" && m.goodDaysCount === 1 ? `<span class="muted" style="font-size:0.75rem;">1/2 dagen Goed</span>` : "";
       return `
         <li class="gr-item">
-          <div class="gr-item-name">${escapeHtml(o.naam)}${scoreTxt}</div>
+          <div class="gr-item-name">${escapeHtml(o.naam)}</div>
           <div class="gr-item-bar">
-            <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
+            <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">${badgeHtml}${daysHint}</div>
             <button class="btn btn-secondary btn-sm" type="button" data-open-gr="${o.id}">Oefen</button>
           </div>
         </li>
@@ -3438,6 +3469,899 @@ function handleSpeakingWorkspaceClick(e) {
   }
 }
 
+/* ---------- Tab 5b: Grammatica Coach (Uitbreidbaar · Hybride AI + Leerkracht-paneel) ---------- */
+
+// Declaratieve tabel met B1-oefentypes — nieuw type van de thuisleerkracht toevoegen = 1 object bijplaatsen
+const GRAMMAR_EXERCISE_TYPES = [
+  {
+    id: "mix",
+    label: "Slimme mix",
+    desc: "Combineert de meest relevante B1-oefentypes voor dit onderdeel + herhaalt zwakke punten.",
+    promptSpec: "Varieer slim tussen invuloefening, zinstransformatie, foutenjacht, zinnen combineren, micro-vertaling en mini-productie (passend bij dit grammatica-onderdeel).",
+  },
+  {
+    id: "invul",
+    label: "Invuloefening",
+    desc: "Kies de juiste vorm, tijd, lidwoord, voorzetsel of congruentie in context.",
+    promptSpec: "Maak contextuele invulzinnen met een gat (____) en geef tussen haakjes het basiswoord/werkwoord in de infinitief.",
+  },
+  {
+    id: "transformatie",
+    label: "Zinstransformatie",
+    desc: "Herschrijf de zin (tijd omzetten, ontkenning, voornaamwoorden COD/COI/y/en, beleefdheid).",
+    promptSpec: "Geef een Franse zin met een concrete herschrijfopdracht (bv. zet in passé composé, vervang het onderstreepte deel door een voornaamwoord, maak ontkennend of beleefd).",
+  },
+  {
+    id: "foutenjacht",
+    label: "Foutenjacht",
+    desc: "Spoor een typische Examencommissie-fout op (bv. aller/allez/allé, accord met être) en verbeter.",
+    promptSpec: "Geef telkens 1 Franse B1-zin met precies 1 of 2 typische Vlaamse Examencommissie-fouten op dit grammaticapunt; de leerling moet de volledige zin foutloos herschrijven.",
+  },
+  {
+    id: "combineren",
+    label: "Zinnen combineren",
+    desc: "Voeg twee korte zinnen samen met qui/que/dont/où, si-zinnen of signaalwoorden.",
+    promptSpec: "Geef twee korte Franse zinnen die de leerling moet combineren tot één vlotte samengestelde B1-zin met de doelstructuur.",
+  },
+  {
+    id: "vertaling",
+    label: "Micro-vertaling (NL → FR)",
+    desc: "Vertaal 1 gerichte zin om typische Nederlandse interferentie te doorbreken.",
+    promptSpec: "Geef telkens 1 korte Nederlandse zin (8-14 woorden) die typische NL→FR valkuilen op dit grammaticapunt test.",
+  },
+  {
+    id: "productie",
+    label: "Mini-productie",
+    desc: "Schrijf zelf 1-2 korte Franse zinnen met een gerichte grammaticale dwangregel.",
+    promptSpec: "Geef een concrete mini-schrijfopdracht (1-2 eigen Franse zinnen) waarin de leerling de regel verplicht actief moet toepassen.",
+  },
+];
+
+const GRAMMAR_MODES = [
+  { id: "ai_coach", label: "AI Grammatica-coach", render: renderGrammarAiCoach },
+  { id: "basis", label: "Snelle offline dril (0 API)", render: renderGrammarOffline },
+  { id: "theorie", label: "Regelkaart & voorbeelden", render: renderGrammarTheory },
+  { id: "leerkracht", label: "Leerkracht-paneel (eigen oefeningen)", render: renderGrammarTeacherPanel },
+];
+
+function getAllGrammarTopics() {
+  return App.curriculum.grammatica.flatMap((p) =>
+    p.onderdelen.map((o) => ({ ...o, pijler: p.pijler, pijlerTitel: p.titel }))
+  );
+}
+
+function getCurrentGrammarTopic() {
+  const all = getAllGrammarTopics();
+  return all.find((t) => t.id === App.grammar.topicId) || all[0];
+}
+
+function getCustomGrammarBucket(topicId) {
+  if (!App.progress.customGrammar || typeof App.progress.customGrammar !== "object") {
+    App.progress.customGrammar = {};
+  }
+  const cur = App.progress.customGrammar[topicId] || {};
+  return {
+    focus: typeof cur.focus === "string" ? cur.focus : "",
+    exercises: Array.isArray(cur.exercises) ? cur.exercises : [],
+  };
+}
+
+function ensureGrammarProgressBucket(topicId) {
+  if (!App.progress.grammatica[topicId] || typeof App.progress.grammatica[topicId] !== "object") {
+    App.progress.grammatica[topicId] = { sessions: [], weakPoints: [], offlineCount: 0 };
+  }
+  const b = App.progress.grammatica[topicId];
+  if (!Array.isArray(b.sessions)) b.sessions = [];
+  if (!Array.isArray(b.weakPoints)) b.weakPoints = [];
+  return b;
+}
+
+function showGrammarError(msg) {
+  const el = document.getElementById("gr-error");
+  if (!el) return;
+  if (!msg) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function initGrammarModule() {
+  const pSel = document.getElementById("gr-pillar-select");
+  pSel.innerHTML = `<option value="__all">Alle 4 pijlers (17)</option>` +
+    App.curriculum.grammatica.map((p) => `<option value="${p.pijler}">${escapeHtml(p.titel)} (${p.onderdelen.length})</option>`).join("");
+  pSel.value = App.grammar.pillar;
+
+  populateGrammarTopics();
+  renderGrammarModeBar();
+  renderGrammarMeta();
+}
+
+function populateGrammarTopics() {
+  const tSel = document.getElementById("gr-topic-select");
+  const all = getAllGrammarTopics();
+  const filtered = App.grammar.pillar === "__all" ? all : all.filter((t) => t.pijler === App.grammar.pillar);
+  tSel.innerHTML = filtered.map((t) => {
+    const customCount = getCustomGrammarBucket(t.id).exercises.length;
+    const tag = customCount ? ` · +${customCount} leerkracht` : "";
+    return `<option value="${t.id}">${escapeHtml(t.naam)}${tag}</option>`;
+  }).join("");
+  if (!filtered.some((t) => t.id === App.grammar.topicId)) {
+    App.grammar.topicId = filtered[0]?.id || "gr01";
+  }
+  tSel.value = App.grammar.topicId;
+}
+
+function renderGrammarModeBar() {
+  const bar = document.getElementById("gr-mode-bar");
+  const customCnt = getCustomGrammarBucket(App.grammar.topicId).exercises.length;
+  bar.innerHTML = GRAMMAR_MODES.map((m) => {
+    const extra = m.id === "leerkracht" && customCnt ? ` (${customCnt})` : "";
+    return `<button type="button" class="mode-btn${m.id === App.grammar.mode ? " active" : ""}" data-gr-mode="${m.id}" role="tab">${escapeHtml(m.label)}${extra}</button>`;
+  }).join("");
+}
+
+function renderGrammarMeta() {
+  const wrap = document.getElementById("gr-meta");
+  if (!wrap || !App.curriculum) return;
+  const topic = getCurrentGrammarTopic();
+  const m = computeGrMetrics(topic.id);
+  wrap.innerHTML = `
+    <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
+    ${m.score !== null ? renderCategoryBadge(m.score) : ""}
+    <span class="muted" style="font-size:0.8rem;">${m.goodDaysCount}/2 dagen Goed</span>
+  `;
+}
+
+function openGrammarTopic(topicId) {
+  App.grammar.pillar = "__all";
+  App.grammar.topicId = topicId;
+  App.grammar.session = null;
+  App.grammar.offlineSession = null;
+  showGrammarError("");
+  const pSel = document.getElementById("gr-pillar-select");
+  if (pSel) pSel.value = "__all";
+  populateGrammarTopics();
+  switchTab("drill", "grammar");
+}
+
+function setGrammarMode(modeId) {
+  App.grammar.mode = modeId;
+  showGrammarError("");
+  renderGrammarModeBar();
+  renderGrammarStage();
+}
+
+function renderGrammarStage() {
+  if (!App.curriculum) return;
+  renderGrammarModeBar();
+  renderGrammarMeta();
+  renderGrammarArchive();
+  const mode = GRAMMAR_MODES.find((m) => m.id === App.grammar.mode) || GRAMMAR_MODES[0];
+  mode.render(document.getElementById("gr-stage"));
+}
+
+/* ---------- AI Grammatica-coach (Batch genereren + Batch evalueren + Herstelstap) ---------- */
+
+function getExTypeLabel(id) {
+  return GRAMMAR_EXERCISE_TYPES.find((t) => t.id === id)?.label || id;
+}
+
+async function generateGrammarAiSet(useTeacherCustomOnly = false) {
+  const topic = getCurrentGrammarTopic();
+  const custom = getCustomGrammarBucket(topic.id);
+
+  if (useTeacherCustomOnly) {
+    if (!custom.exercises.length) {
+      showGrammarError("Voeg eerst minstens 1 eigen oefening toe in het Leerkracht-paneel.");
+      return;
+    }
+    const questions = custom.exercises.map((ex, idx) => ({
+      nr: idx + 1,
+      type: ex.type || "transformatie",
+      opdracht_nl: ex.opdracht_nl,
+      context_fr: ex.context_fr || "",
+      hint: ex.hint || "",
+      doelregel: ex.uitleg || topic.naam,
+      refSolution: ex.oplossing || "",
+      isTeacher: true,
+    }));
+    App.grammar.mode = "ai_coach";
+    App.grammar.session = {
+      topicId: topic.id,
+      topicNaam: topic.naam,
+      exerciseType: "leerkracht",
+      questions,
+      answers: questions.map(() => ""),
+      prevAnswers: null,
+      results: null,
+      poging1Pct: null,
+      revising: false,
+      done: false,
+      archiveId: null,
+    };
+    renderGrammarStage();
+    return;
+  }
+
+  if (!canUseAi()) {
+    showGrammarError("Stel eerst je Gemini API-key in via Instellingen (of gebruik de Snelle offline dril).");
+    return;
+  }
+
+  showGrammarError("");
+  App.grammar.loading = true;
+  renderGrammarStage();
+
+  try {
+    const typeObj = GRAMMAR_EXERCISE_TYPES.find((t) => t.id === App.grammar.exerciseType) || GRAMMAR_EXERCISE_TYPES[0];
+    const count = App.grammar.count;
+    const metrics = computeGrMetrics(topic.id);
+    const exLines = topic.voorbeelden.map((v) => `- ${v.fr} (${v.nl})`).join("\n");
+    const weakBlock = metrics.weakPoints.length
+      ? `\nEerdere zwakke punten van deze leerling (extra op focussen!): ${metrics.weakPoints.join(", ")}.`
+      : "";
+    const focusBlock = custom.focus
+      ? `\nSpecifieke focus / instructie van de thuisleerkracht (BELANGRIJK, neem mee!): ${custom.focus}`
+      : "";
+
+    const prompt = [
+      `Je bent een ervaren docent Frans (Vlaamse Examencommissie Frans 2, 2de graad doorstroomfinaliteit, niveau B1).`,
+      `Onderdeel: ${topic.naam} (${topic.pijlerTitel})\nRegel: ${topic.uitleg}\nVoorbeelden:\n${exLines}${weakBlock}${focusBlock}`,
+      `Maak precies ${count} gevarieerde, concrete B1-grammatica-oefeningen (type: ${typeObj.label}).\nInstructie oefentype: ${typeObj.promptSpec}`,
+      `Geef UITSLUITEND een JSON-array met exact ${count} objecten: [{"type":"invul|transformatie|foutenjacht|combineren|vertaling|productie","opdracht_nl":"heldere korte NL opdracht","context_fr":"Franse opgavezin (of lege string bij vertaling/productie)","hint":"optionele korte NL hint of lege string","doelregel":"korte tag van het geteste deelaspect"}]`,
+    ].join("\n\n");
+
+    const parsed = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1600, temperature: 0.6 });
+    if (!Array.isArray(parsed) || !parsed.length) throw new Error("Geen geldige oefeningen ontvangen. Probeer opnieuw.");
+
+    const questions = parsed.slice(0, count).map((q, idx) => ({
+      nr: idx + 1,
+      type: q.type || (typeObj.id === "mix" ? "invul" : typeObj.id),
+      opdracht_nl: q.opdracht_nl || "Vul aan of herschrijf in correct Frans.",
+      context_fr: q.context_fr || "",
+      hint: q.hint || "",
+      doelregel: q.doelregel || topic.naam,
+    }));
+
+    App.grammar.session = {
+      topicId: topic.id,
+      topicNaam: topic.naam,
+      exerciseType: typeObj.id,
+      questions,
+      answers: questions.map(() => ""),
+      prevAnswers: null,
+      results: null,
+      poging1Pct: null,
+      revising: false,
+      done: false,
+      archiveId: null,
+    };
+  } catch (err) {
+    showGrammarError(err.message);
+  } finally {
+    App.grammar.loading = false;
+    renderGrammarStage();
+  }
+}
+
+async function evaluateGrammarSession() {
+  const s = App.grammar.session;
+  if (!s || !canUseAi() || App.grammar.evaluating) return;
+
+  const isRevision = Boolean(s.revising && s.results);
+  const targetIndices = isRevision
+    ? s.questions.map((_, i) => i).filter((i) => s.results[i]?.oordeel !== "juist")
+    : s.questions.map((_, i) => i);
+
+  for (const i of targetIndices) {
+    if (!String(s.answers[i] || "").trim()) {
+      showGrammarError(`Vul eerst vraag ${i + 1} in voordat je controleert.`);
+      return;
+    }
+    if (isRevision && normalizeFr(s.answers[i]) === normalizeFr(s.prevAnswers?.[i] || "")) {
+      showGrammarError(`Pas je antwoord bij vraag ${i + 1} eerst aan op basis van de uitleg.`);
+      return;
+    }
+  }
+
+  showGrammarError("");
+  App.grammar.evaluating = true;
+  renderGrammarStage();
+
+  try {
+    const topic = getAllGrammarTopics().find((t) => t.id === s.topicId) || getCurrentGrammarTopic();
+    const qaLines = targetIndices.map((i) => {
+      const q = s.questions[i];
+      const ref = q.refSolution ? ` | Richtoplossing leerkracht: ${q.refSolution}` : "";
+      return `Vraag ${i + 1} [${q.type}]: ${q.opdracht_nl}${q.context_fr ? ` | Opgave: ${q.context_fr}` : ""}${ref}\nAntwoord leerling: "${s.answers[i].trim()}"`;
+    }).join("\n\n");
+
+    const prompt = [
+      `Je bent een strenge, didactisch sterke docent Frans (Vlaamse Examencommissie B1).`,
+      `Grammatica-onderdeel: ${topic.naam} — ${topic.uitleg}`,
+      `Beoordeel deze ${targetIndices.length} leerlingantwoorden eerlijk en streng op het gevraagde grammaticapunt (let op vervoeging, accord, lidwoorden, accenten en zinsbouw; accepteer geldige alternatieve Franse formuleringen als ze grammaticaal 100% correct zijn).`,
+      qaLines,
+      `Geef UITSLUITEND een JSON-array met exact ${targetIndices.length} objecten in dezelfde volgorde: [{"vraagNr":1,"oordeel":"juist|bijna|fout","uitleg":"1-2 korte concrete NL zinnen","modeloplossing":"beste correcte Franse zin","fouttype":"korte NL tag (bv. accord met être, accent) of lege string bij juist"}]`,
+    ].join("\n\n");
+
+    const parsed = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1600, temperature: 0.15 });
+    if (!Array.isArray(parsed) || !parsed.length) throw new Error("Kon evaluatie niet uitlezen. Probeer opnieuw.");
+
+    const nextResults = s.results ? [...s.results] : s.questions.map(() => null);
+    targetIndices.forEach((qIdx, pos) => {
+      const item = parsed[pos] || parsed.find((x) => Number(x.vraagNr) === qIdx + 1) || {};
+      const ord = ["juist", "bijna", "fout"].includes(String(item.oordeel || "").toLowerCase())
+        ? String(item.oordeel).toLowerCase()
+        : "fout";
+      nextResults[qIdx] = {
+        oordeel: ord,
+        uitleg: item.uitleg || "",
+        modeloplossing: item.modeloplossing || "",
+        fouttype: ord === "juist" ? "" : (item.fouttype || s.questions[qIdx].doelregel || ""),
+      };
+    });
+
+    s.results = nextResults;
+    const pts = nextResults.reduce((acc, r) => acc + (r?.oordeel === "juist" ? 2 : r?.oordeel === "bijna" ? 1 : 0), 0);
+    const pct = Math.round((pts / Math.max(1, nextResults.length * 2)) * 100);
+    const hasMistakes = nextResults.some((r) => r?.oordeel !== "juist");
+
+    const bucket = ensureGrammarProgressBucket(s.topicId);
+    const nowIso = new Date().toISOString();
+    const dayKey = nowIso.slice(0, 10);
+
+    if (!isRevision) {
+      s.poging1Pct = pct;
+      s.prevAnswers = [...s.answers];
+      s.revising = hasMistakes;
+      s.done = !hasMistakes;
+
+      // Update weak points from mistakes
+      const newWeaks = nextResults.map((r) => r?.fouttype).filter(Boolean);
+      if (newWeaks.length) {
+        bucket.weakPoints = [...new Set([...newWeaks, ...bucket.weakPoints])].slice(0, 6);
+      } else if (pct >= 85) {
+        bucket.weakPoints = bucket.weakPoints.slice(1);
+      }
+
+      bucket.sessions.push({ datum: nowIso, dayKey, scorePct: pct, count: s.questions.length });
+      s.archiveId = `gr_${Date.now()}`;
+      App.progress.grammaticaArchief.push({
+        id: s.archiveId,
+        datum: nowIso,
+        topicId: s.topicId,
+        topicNaam: s.topicNaam,
+        exerciseType: s.exerciseType,
+        scorePct: pct,
+        verbeterdPct: null,
+        items: s.questions.map((q, i) => ({
+          type: q.type,
+          opdracht_nl: q.opdracht_nl,
+          context_fr: q.context_fr,
+          antwoord1: s.answers[i],
+          resultaat1: nextResults[i],
+          antwoord2: null,
+          resultaat2: null,
+        })),
+      });
+      if (App.progress.grammaticaArchief.length > 40) {
+        App.progress.grammaticaArchief = App.progress.grammaticaArchief.slice(-40);
+      }
+    } else {
+      s.revising = false;
+      s.done = true;
+      s.poging2Pct = pct;
+      const arch = App.progress.grammaticaArchief.find((a) => a.id === s.archiveId);
+      if (arch) {
+        arch.verbeterdPct = pct;
+        targetIndices.forEach((i) => {
+          if (arch.items[i]) {
+            arch.items[i].antwoord2 = s.answers[i];
+            arch.items[i].resultaat2 = nextResults[i];
+          }
+        });
+      }
+    }
+
+    scheduleSaveProgress();
+  } catch (err) {
+    showGrammarError(err.message);
+  } finally {
+    App.grammar.evaluating = false;
+    renderGrammarStage();
+  }
+}
+
+function renderGrammarAiCoach(container) {
+  const topic = getCurrentGrammarTopic();
+  const custom = getCustomGrammarBucket(topic.id);
+  const metrics = computeGrMetrics(topic.id);
+  const s = App.grammar.session?.topicId === topic.id ? App.grammar.session : null;
+
+  const typeChips = GRAMMAR_EXERCISE_TYPES.map((t) =>
+    `<button type="button" class="chip${App.grammar.exerciseType === t.id ? " active" : ""}" data-gr-extype="${t.id}" title="${escapeHtml(t.desc)}">${escapeHtml(t.label)}</button>`
+  ).join("");
+
+  const countChips = [5, 8, 10].map((n) =>
+    `<button type="button" class="chip${App.grammar.count === n ? " active" : ""}" data-gr-count="${n}">${n} vragen</button>`
+  ).join("");
+
+  const setupCard = `
+    <div class="card">
+      <div class="stage-toolbar" style="margin-bottom:0.6rem;">
+        <div class="filter-group">${typeChips}</div>
+        <div class="filter-group">${countChips}</div>
+      </div>
+      ${custom.focus ? `<div class="teacher-focus-banner"><strong>👩‍🏫 Focus van de leerkracht:</strong> ${escapeHtml(custom.focus)}</div>` : ""}
+      ${metrics.weakPoints.length ? `<div style="margin-bottom:0.75rem;font-size:0.84rem;"><span class="muted">Zwakke punten (komen extra terug):</span><div class="weak-tags">${metrics.weakPoints.map((w) => `<span class="weak-tag">${escapeHtml(w)}</span>`).join("")}</div></div>` : ""}
+      <div class="btn-row" style="justify-content:space-between;">
+        <span class="muted">${escapeHtml((GRAMMAR_EXERCISE_TYPES.find((t) => t.id === App.grammar.exerciseType) || GRAMMAR_EXERCISE_TYPES[0]).desc)}</span>
+        <div class="btn-row">
+          ${custom.exercises.length ? `<button type="button" class="btn btn-secondary btn-sm" data-gr-action="start-teacher-set">👩‍🏫 Oefen leerkracht-vragen (${custom.exercises.length})</button>` : ""}
+          <button type="button" class="btn btn-primary" data-gr-action="generate" ${App.grammar.loading ? "disabled" : ""}>
+            ${App.grammar.loading ? "Oefeningen maken…" : `✨ Genereer ${App.grammar.count} oefeningen`}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (App.grammar.loading) {
+    container.innerHTML = `${setupCard}<div class="card empty-module"><p class="muted">✨ ${App.grammar.count} gevarieerde B1-oefeningen worden gegenereerd…</p></div>`;
+    return;
+  }
+
+  if (!s) {
+    container.innerHTML = `${setupCard}
+      <div class="card empty-module">
+        <h3>${escapeHtml(topic.naam)}</h3>
+        <p class="muted" style="max-width:650px;margin:0.4rem auto 0;">${escapeHtml(topic.uitleg)}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const step = !s.results ? 1 : s.revising ? 2 : 3;
+  const stepperHtml = `
+    <div class="write-stepper">
+      <span class="step-pill ${step > 1 ? "done" : "active"}">${step > 1 ? "✓ " : ""}1. Reeks invullen (${s.questions.length})</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 2 ? "active" : step > 2 ? "done" : ""}">${step > 2 ? "✓ " : ""}2. Fouten verbeteren</span>
+      <span class="step-sep">→</span>
+      <span class="step-pill ${step === 3 ? "done" : ""}">${step === 3 ? "✓ " : ""}3. Afgerond</span>
+    </div>
+  `;
+
+  const bannerHtml = s.revising
+    ? `<div class="card" style="border-color:#f59e0b;background:var(--warn-soft);display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <div><strong>✏️ Stap 2: Verbeter enkel de gemarkeerde vragen</strong><div class="muted" style="color:#78350f;">Je juiste antwoorden blijven staan. Pas de andere aan op basis van de uitleg en controleer opnieuw.</div></div>
+        ${renderCategoryBadge(s.poging1Pct, true)}
+      </div>`
+    : s.done
+      ? `<div class="card" style="border-color:#a7f3d0;background:var(--ok-soft);display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+          <div>
+            <strong>✓ Oefenreeks afgerond!</strong>
+            <div class="muted">Resultaat automatisch opgeslagen voor gespreide beheersing (${computeGrMetrics(topic.id).goodDaysCount}/2 dagen Goed).</div>
+          </div>
+          <div class="btn-row">
+            ${s.poging2Pct !== undefined && s.poging2Pct !== null
+              ? `${renderCategoryBadge(s.poging1Pct)} → ${renderCategoryBadge(s.poging2Pct, true)}`
+              : renderCategoryBadge(s.poging1Pct, true)}
+            <button type="button" class="btn btn-primary btn-sm" data-gr-action="generate">✨ Nieuwe reeks</button>
+          </div>
+        </div>`
+      : "";
+
+  const questionsHtml = s.questions.map((q, i) => {
+    const r = s.results?.[i];
+    const isLocked = s.done || (s.revising && r?.oordeel === "juist");
+    const verdictCls = r ? ` verdict-${r.oordeel}` : "";
+    const verdictLabel = r
+      ? (r.oordeel === "juist" ? `<span class="cat-badge cat-excellent">✓ Juist</span>` : r.oordeel === "bijna" ? `<span class="cat-badge cat-bijna">Bijna</span>` : `<span class="cat-badge cat-onvoldoende">Verbeter</span>`)
+      : "";
+    const isLong = q.type === "productie" || q.type === "combineren";
+    const inputId = `gr-ans-${i}`;
+    const inputEl = isLong
+      ? `<textarea id="${inputId}" class="scratchpad-editor" style="min-height:74px;background:#fff;" data-gr-ans="${i}" spellcheck="false" autocomplete="off" ${isLocked ? "disabled" : ""} placeholder="Typ je Franse zin(nen)…">${escapeHtml(s.answers[i])}</textarea>`
+      : `<input id="${inputId}" class="input" type="text" data-gr-ans="${i}" value="${escapeHtml(s.answers[i])}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" ${isLocked ? "disabled" : ""} placeholder="Typ je Franse antwoord…" />`;
+
+    return `
+      <div class="gr-q-card${verdictCls}">
+        <div class="gr-q-top">
+          <span class="gr-type-tag">${i + 1}. ${escapeHtml(getExTypeLabel(q.type))}${q.isTeacher ? " · 👩‍🏫 Leerkracht" : ""}</span>
+          ${verdictLabel}
+        </div>
+        <p class="gr-q-prompt">${escapeHtml(q.opdracht_nl)}</p>
+        ${q.context_fr ? `<div class="gr-q-context">${escapeHtml(q.context_fr)}</div>` : ""}
+        ${q.hint && !isLocked ? `<div class="muted" style="font-size:0.82rem;margin-bottom:0.45rem;">Hint: ${escapeHtml(q.hint)}</div>` : ""}
+        ${inputEl}
+        ${r ? `
+          <div class="gr-q-feedback">
+            <div>${escapeHtml(r.uitleg)}</div>
+            ${(r.modeloplossing && (s.done || r.oordeel === "juist")) ? `<div style="margin-top:0.3rem;"><strong>Model:</strong> ${escapeHtml(r.modeloplossing)} <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(r.modeloplossing)}" title="Luister">🔊</button></div>` : ""}
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
+
+  const actionBar = !s.done
+    ? `
+      <div class="card">
+        <div class="muted" style="margin-bottom:0.35rem;font-size:0.82rem;">Klik in een invoerveld en gebruik de Franse accenten:</div>
+        ${renderAccentBar("__gr_active")}
+        <div class="btn-row" style="justify-content:flex-end;">
+          <button type="button" class="btn btn-primary" data-gr-action="evaluate" ${App.grammar.evaluating ? "disabled" : ""}>
+            ${App.grammar.evaluating ? "Antwoorden nakijken…" : s.revising ? "✓ Controleer verbeterde antwoorden" : `✓ Controleer mijn ${s.questions.length} antwoorden`}
+          </button>
+        </div>
+      </div>
+    `
+    : "";
+
+  container.innerHTML = `
+    ${setupCard}
+    ${stepperHtml}
+    ${bannerHtml}
+    <div class="gr-question-list">${questionsHtml}</div>
+    ${actionBar}
+  `;
+}
+
+/* ---------- Mode 2: Snelle offline grammaticadril (0 API-calls · Enter-flow) ---------- */
+
+function startGrammarOfflineSession() {
+  const topic = getCurrentGrammarTopic();
+  const allTopics = App.grammar.pillar === "__all"
+    ? getAllGrammarTopics()
+    : getAllGrammarTopics().filter((t) => t.pijler === App.grammar.pillar);
+  const basePool = [
+    ...topic.voorbeelden.map((vb) => ({ ...vb, topicId: topic.id, topicNaam: topic.naam })),
+    ...shuffleArray(allTopics.filter((t) => t.id !== topic.id).flatMap((t) => t.voorbeelden.map((vb) => ({ ...vb, topicId: t.id, topicNaam: t.naam })))).slice(0, 6),
+  ];
+  App.grammar.offlineSession = {
+    topicId: topic.id,
+    queue: basePool.map((item) => ({ item, isRetry: false, recorded: false })),
+    initialTotal: basePool.length,
+    points: 0,
+    prevFeedback: null,
+    done: false,
+  };
+}
+
+function renderGrammarOffline(container) {
+  const topic = getCurrentGrammarTopic();
+  if (!App.grammar.offlineSession || App.grammar.offlineSession.topicId !== topic.id) {
+    startGrammarOfflineSession();
+  }
+  const s = App.grammar.offlineSession;
+
+  if (s.done) {
+    const pct = Math.round((s.points / Math.max(1, s.initialTotal)) * 100);
+    container.innerHTML = `
+      <div class="card exercise-card">
+        ${renderPrevFeedbackBar(s.prevFeedback)}
+        <div class="summary-box">
+          <h3>Offline basisdril klaar!</h3>
+          <div style="margin:0.65rem 0;">${renderCategoryBadge(pct, true)}</div>
+          <p class="muted">Eerste poging: ${s.points} / ${s.initialTotal} juist · Klaar voor de AI Grammatica-coach?</p>
+          <div class="btn-row" style="justify-content:center;margin-top:1rem;">
+            <button type="button" class="btn btn-primary" data-gr-mode="ai_coach">Naar AI Grammatica-coach →</button>
+            <button type="button" class="btn btn-secondary" data-gr-offline="restart">Opnieuw</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const cur = s.queue[0];
+  const item = cur.item;
+  const gapIdx = item.fr.indexOf(item.gat);
+  const before = gapIdx >= 0 ? item.fr.slice(0, gapIdx) : "";
+  const after = gapIdx >= 0 ? item.fr.slice(gapIdx + item.gat.length) : "";
+
+  container.innerHTML = `
+    <div class="card exercise-card">
+      ${renderPrevFeedbackBar(s.prevFeedback)}
+      <div class="exercise-progress">
+        <span>Nog <strong>${s.queue.length}</strong> zin(nen) · ${escapeHtml(item.topicNaam)}</span>
+        <span>${cur.isRetry ? `<span class="retry-badge">↻ Herhaalzin</span>` : "0 API-calls · Enter = volgende"}</span>
+      </div>
+      <div class="muted">Vertaling (hint): <strong>${escapeHtml(item.nl)}</strong></div>
+      <div class="cloze-sentence">
+        ${escapeHtml(before)}<input id="gr-offline-input" class="cloze-input" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="…" />${escapeHtml(after)}
+      </div>
+      ${renderAccentBar("gr-offline-input")}
+      <div class="btn-row" style="justify-content:space-between;">
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" data-gr-offline="submit">Controleer &amp; volgende ↵</button>
+          <button type="button" class="btn btn-secondary" data-gr-offline="skip" tabindex="-1">Weet ik niet</button>
+        </div>
+        <span class="kbd-hint">↵ Enter = controleer &amp; meteen volgende</span>
+      </div>
+    </div>
+  `;
+
+  const inp = document.getElementById("gr-offline-input");
+  if (inp) inp.focus();
+}
+
+function submitGrammarOfflineInstant(forceSkip = false) {
+  const s = App.grammar.offlineSession;
+  if (!s || s.done || !s.queue.length) return;
+  const inp = document.getElementById("gr-offline-input");
+  const given = forceSkip ? "" : (inp ? inp.value.trim() : "");
+  const cur = s.queue.shift();
+  const item = cur.item;
+  const kind = !given ? "wrong" : checkClozeAnswer(given, item.gat);
+
+  if (!cur.recorded) {
+    cur.recorded = true;
+    s.points += kind === "exact" ? 1 : kind === "accent" ? 0.5 : 0;
+  }
+  if (kind !== "exact") {
+    s.queue.push({ item, isRetry: true, recorded: true });
+  }
+  s.prevFeedback = { kind, given, expected: item.gat, sub: item.fr, speakText: item.fr };
+  if (!s.queue.length) {
+    s.done = true;
+    const b = ensureGrammarProgressBucket(s.topicId);
+    b.offlineCount = (b.offlineCount || 0) + 1;
+    scheduleSaveProgress();
+  }
+  renderGrammarStage();
+}
+
+/* ---------- Mode 3: Regelkaart & voorbeelden ---------- */
+
+function renderGrammarTheory(container) {
+  const topic = getCurrentGrammarTopic();
+  const metrics = computeGrMetrics(topic.id);
+  const custom = getCustomGrammarBucket(topic.id);
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="stage-toolbar">
+        <div>
+          <span class="weight-pill">${escapeHtml(topic.pijlerTitel)}</span>
+          <h3 style="margin:0.45rem 0 0;">${escapeHtml(topic.naam)}</h3>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" data-gr-mode="ai_coach">Oefen deze regel →</button>
+      </div>
+      <p style="font-size:0.98rem;line-height:1.65;">${escapeHtml(topic.uitleg)}</p>
+      ${custom.focus ? `<div class="teacher-focus-banner"><strong>👩‍🏫 Extra tip van de leerkracht:</strong> ${escapeHtml(custom.focus)}</div>` : ""}
+      <h4 style="margin:1rem 0 0.45rem;font-size:0.94rem;">Voorbeeldzinnen</h4>
+      <div class="examples-list" style="margin-top:0;">
+        ${topic.voorbeelden.map((v) => `
+          <div class="example-item">
+            <div>
+              <div><strong>${escapeHtml(v.fr)}</strong></div>
+              <div class="muted">${escapeHtml(v.nl)}</div>
+            </div>
+            <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(v.fr)}" title="Luister zin">🔊</button>
+          </div>
+        `).join("")}
+      </div>
+      ${metrics.weakPoints.length ? `
+        <h4 style="margin:1.1rem 0 0.35rem;font-size:0.94rem;">Jouw recente aandachtspunten bij dit onderdeel</h4>
+        <div class="weak-tags">${metrics.weakPoints.map((w) => `<span class="weak-tag">${escapeHtml(w)}</span>`).join("")}</div>
+      ` : ""}
+    </div>
+  `;
+}
+
+/* ---------- Mode 4: Leerkracht-paneel (eigen focus & vaste oefeningen op server) ---------- */
+
+function renderGrammarTeacherPanel(container) {
+  const topic = getCurrentGrammarTopic();
+  const custom = getCustomGrammarBucket(topic.id);
+  const typeOpts = GRAMMAR_EXERCISE_TYPES.filter((t) => t.id !== "mix")
+    .map((t) => `<option value="${t.id}">${escapeHtml(t.label)}</option>`)
+    .join("");
+
+  const listHtml = custom.exercises.length
+    ? `<div class="gr-question-list" style="margin-top:0.85rem;">${custom.exercises.map((ex, idx) => `
+        <div class="custom-ex-row">
+          <div>
+            <span class="gr-type-tag">${escapeHtml(getExTypeLabel(ex.type))}</span>
+            <div style="font-weight:600;margin-top:0.3rem;">${escapeHtml(ex.opdracht_nl)}</div>
+            ${ex.context_fr ? `<div class="muted">${escapeHtml(ex.context_fr)}</div>` : ""}
+            ${ex.oplossing ? `<div class="muted" style="font-size:0.84rem;"><strong>Oplossing:</strong> ${escapeHtml(ex.oplossing)}</div>` : ""}
+            ${ex.uitleg ? `<div class="muted" style="font-size:0.82rem;"><strong>Uitleg:</strong> ${escapeHtml(ex.uitleg)}</div>` : ""}
+          </div>
+          <button type="button" class="btn btn-ghost-danger btn-sm" data-gr-del-custom="${idx}">Verwijder</button>
+        </div>
+      `).join("")}</div>`
+    : `<p class="muted" style="margin:0.65rem 0 0;">Nog geen eigen oefeningen toegevoegd voor dit onderdeel.</p>`;
+
+  container.innerHTML = `
+    <div class="card">
+      <h3 style="margin:0 0 0.35rem;">👩‍🏫 AI-focus / instructie van de leerkracht</h3>
+      <p class="muted" style="margin:0 0 0.6rem;">Vul hier advies van de thuisleerkracht in voor <strong>${escapeHtml(topic.naam)}</strong>. De AI Grammatica-coach neemt deze focus automatisch mee in elke nieuwe oefenreeks.</p>
+      <textarea id="gr-teacher-focus" class="scratchpad-editor" style="min-height:80px;" placeholder="Bv. Extra oefenen op het onderscheid imparfait vs. passé composé in verhalen, of veel aandacht voor wederkerende werkwoorden met être…">${escapeHtml(custom.focus)}</textarea>
+      <div class="btn-row" style="margin-top:0.6rem;justify-content:flex-end;">
+        <button type="button" class="btn btn-primary btn-sm" data-gr-action="save-focus">Bewaar focus op server</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stage-toolbar" style="margin-bottom:0.5rem;">
+        <h3 style="margin:0;">Eigen vaste oefening toevoegen</h3>
+        ${custom.exercises.length ? `<button type="button" class="btn btn-primary btn-sm" data-gr-action="start-teacher-set">Oefen deze ${custom.exercises.length} vragen →</button>` : ""}
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label for="gr-new-type">Oefentype</label>
+          <select id="gr-new-type" class="input">${typeOpts}</select>
+        </div>
+        <div class="form-group">
+          <label for="gr-new-prompt">Opdracht (NL) *</label>
+          <input id="gr-new-prompt" class="input" type="text" placeholder="Bv. Zet in de passé composé (let op accord)" />
+        </div>
+        <div class="form-group">
+          <label for="gr-new-context">Franse opgavezin (optioneel)</label>
+          <input id="gr-new-context" class="input" type="text" placeholder="Bv. Elle (se lever) à sept heures." />
+        </div>
+        <div class="form-group">
+          <label for="gr-new-solution">Gewenste oplossing (FR, optioneel)</label>
+          <input id="gr-new-solution" class="input" type="text" placeholder="Bv. Elle s'est levée à sept heures." />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="gr-new-uitleg">Korte uitleg / regel (optioneel)</label>
+        <input id="gr-new-uitleg" class="input" type="text" placeholder="Bv. Wederkerende werkwoorden vervoegen altijd met être." />
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" data-gr-action="add-custom">+ Voeg oefening toe</button>
+      ${listHtml}
+    </div>
+  `;
+}
+
+function renderGrammarArchive() {
+  const wrap = document.getElementById("gr-archive");
+  const countEl = document.getElementById("gr-archive-count");
+  if (!wrap || !countEl) return;
+  const items = [...(App.progress.grammaticaArchief || [])].reverse().slice(0, 12);
+  countEl.textContent = `${items.length} recente grammatica-reeksen — met leerlingantwoorden en AI-uitleg`;
+  if (!items.length) {
+    wrap.innerHTML = `<div class="card muted">Nog geen afgeronde grammatica-reeksen.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `<div class="archive-list">${items.map((a) => {
+    const badge = a.verbeterdPct !== null && a.verbeterdPct !== undefined
+      ? `${renderCategoryBadge(a.scorePct)} → ${renderCategoryBadge(a.verbeterdPct)}`
+      : renderCategoryBadge(a.scorePct);
+    const body = (a.items || []).map((it, i) => `
+      <div class="gr-q-feedback" style="margin-top:0.55rem;">
+        <strong>${i + 1}. ${escapeHtml(it.opdracht_nl)}</strong> ${it.context_fr ? `<span class="muted">(${escapeHtml(it.context_fr)})</span>` : ""}
+        <div><strong>Antwoord:</strong> ${escapeHtml(it.antwoord1)} ${it.resultaat1 ? `— <em>${escapeHtml(it.resultaat1.oordeel)}</em>` : ""}</div>
+        ${it.antwoord2 ? `<div><strong>Verbeterd:</strong> ${escapeHtml(it.antwoord2)} ${it.resultaat2 ? `— <em>${escapeHtml(it.resultaat2.oordeel)}</em>` : ""}</div>` : ""}
+        ${it.resultaat1?.uitleg ? `<div class="muted">${escapeHtml(it.resultaat1.uitleg)}</div>` : ""}
+      </div>
+    `).join("");
+    return `
+      <details class="archive-item">
+        <summary class="archive-summary">
+          <div>
+            <strong>${escapeHtml(a.topicNaam)}</strong>
+            <div class="muted">${new Date(a.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(getExTypeLabel(a.exerciseType))} (${(a.items || []).length} vragen)</div>
+          </div>
+          <div class="btn-row" style="gap:0.35rem;">${badge}</div>
+        </summary>
+        <div class="archive-body">${body}</div>
+      </details>
+    `;
+  }).join("")}</div>`;
+}
+
+function handleGrammarStageClick(e) {
+  const speakBtn = e.target.closest("[data-speak]");
+  if (speakBtn) {
+    speakFrench(speakBtn.dataset.speak);
+    return;
+  }
+
+  const modeBtn = e.target.closest("[data-gr-mode]");
+  if (modeBtn) {
+    setGrammarMode(modeBtn.dataset.grMode);
+    return;
+  }
+
+  const accBtn = e.target.closest("[data-accent]");
+  if (accBtn) {
+    const targetId = accBtn.dataset.accentTarget === "__gr_active"
+      ? (App.grammar.activeInputId || "gr-ans-0")
+      : accBtn.dataset.accentTarget;
+    const inp = document.getElementById(targetId);
+    insertAtCursor(inp, accBtn.dataset.accent);
+    if (inp && inp.dataset.grAns !== undefined && App.grammar.session) {
+      App.grammar.session.answers[Number(inp.dataset.grAns)] = inp.value;
+    }
+    return;
+  }
+
+  const exBtn = e.target.closest("[data-gr-extype]");
+  if (exBtn) {
+    App.grammar.exerciseType = exBtn.dataset.grExtype;
+    renderGrammarStage();
+    return;
+  }
+
+  const cntBtn = e.target.closest("[data-gr-count]");
+  if (cntBtn) {
+    App.grammar.count = Number(cntBtn.dataset.grCount);
+    renderGrammarStage();
+    return;
+  }
+
+  const offBtn = e.target.closest("[data-gr-offline]");
+  if (offBtn) {
+    const act = offBtn.dataset.grOffline;
+    if (act === "restart") {
+      startGrammarOfflineSession();
+      renderGrammarStage();
+    } else if (act === "submit") {
+      submitGrammarOfflineInstant(false);
+    } else if (act === "skip") {
+      submitGrammarOfflineInstant(true);
+    }
+    return;
+  }
+
+  const delBtn = e.target.closest("[data-gr-del-custom]");
+  if (delBtn) {
+    const topic = getCurrentGrammarTopic();
+    const cur = getCustomGrammarBucket(topic.id);
+    cur.exercises.splice(Number(delBtn.dataset.grDelCustom), 1);
+    App.progress.customGrammar[topic.id] = cur;
+    scheduleSaveProgress();
+    renderGrammarStage();
+    return;
+  }
+
+  const actBtn = e.target.closest("[data-gr-action]");
+  if (!actBtn) return;
+  const act = actBtn.dataset.grAction;
+  const topic = getCurrentGrammarTopic();
+
+  if (act === "generate") {
+    generateGrammarAiSet(false);
+  } else if (act === "start-teacher-set") {
+    generateGrammarAiSet(true);
+  } else if (act === "evaluate") {
+    evaluateGrammarSession();
+  } else if (act === "save-focus") {
+    const val = document.getElementById("gr-teacher-focus")?.value.trim() || "";
+    const cur = getCustomGrammarBucket(topic.id);
+    App.progress.customGrammar[topic.id] = { ...cur, focus: val };
+    scheduleSaveProgress();
+    renderGrammarStage();
+  } else if (act === "add-custom") {
+    const promptNl = document.getElementById("gr-new-prompt")?.value.trim() || "";
+    if (!promptNl) {
+      showGrammarError("Vul minstens een opdracht (NL) in.");
+      return;
+    }
+    showGrammarError("");
+    const cur = getCustomGrammarBucket(topic.id);
+    cur.exercises.push({
+      type: document.getElementById("gr-new-type")?.value || "transformatie",
+      opdracht_nl: promptNl,
+      context_fr: document.getElementById("gr-new-context")?.value.trim() || "",
+      oplossing: document.getElementById("gr-new-solution")?.value.trim() || "",
+      uitleg: document.getElementById("gr-new-uitleg")?.value.trim() || "",
+    });
+    App.progress.customGrammar[topic.id] = cur;
+    scheduleSaveProgress();
+    renderGrammarStage();
+  }
+}
+
 /* ---------- Settings Modal ---------- */
 
 function updateApiIndicator() {
@@ -3566,7 +4490,7 @@ function bindEvents() {
     const wfBtn = e.target.closest("[data-open-wf]");
     if (wfBtn) openVocabField(wfBtn.dataset.openWf);
     const grBtn = e.target.closest("[data-open-gr]");
-    if (grBtn) switchTab("drill", "grammar");
+    if (grBtn) openGrammarTopic(grBtn.dataset.openGr);
     const evalRow = e.target.closest("[data-open-eval]");
     if (evalRow) {
       const id = evalRow.dataset.openEval;
@@ -3709,6 +4633,46 @@ function bindEvents() {
     if (btn) setVocabMode(btn.dataset.vocabMode);
   });
 
+  document.getElementById("gr-pillar-select").addEventListener("change", (e) => {
+    App.grammar.pillar = e.target.value;
+    App.grammar.session = null;
+    App.grammar.offlineSession = null;
+    populateGrammarTopics();
+    renderGrammarStage();
+  });
+
+  document.getElementById("gr-topic-select").addEventListener("change", (e) => {
+    App.grammar.topicId = e.target.value;
+    App.grammar.session = null;
+    App.grammar.offlineSession = null;
+    showGrammarError("");
+    renderGrammarStage();
+  });
+
+  document.getElementById("gr-mode-bar").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gr-mode]");
+    if (btn) setGrammarMode(btn.dataset.grMode);
+  });
+
+  const grStage = document.getElementById("gr-stage");
+  grStage.addEventListener("click", handleGrammarStageClick);
+  grStage.addEventListener("focusin", (e) => {
+    if (e.target.dataset?.grAns !== undefined) {
+      App.grammar.activeInputId = e.target.id;
+    }
+  });
+  grStage.addEventListener("input", (e) => {
+    if (e.target.dataset?.grAns !== undefined && App.grammar.session) {
+      App.grammar.session.answers[Number(e.target.dataset.grAns)] = e.target.value;
+    }
+  });
+  grStage.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "gr-offline-input") {
+      e.preventDefault();
+      submitGrammarOfflineInstant(false);
+    }
+  });
+
   const stage = document.getElementById("vocab-stage");
   stage.addEventListener("click", handleVocabStageClick);
   stage.addEventListener("input", (e) => {
@@ -3763,13 +4727,18 @@ function bindEvents() {
     stopAudioRecording();
     App.progress = defaultProgress();
     App.vocab.session = null;
+    App.grammar.session = null;
+    App.grammar.offlineSession = null;
     App.speak.monologue = null;
     App.speak.dialogue = null;
     scheduleSaveProgress();
     renderDashboard();
     if (App.activeTab === "schrijven") renderWritingModule();
     if (App.activeTab === "spreken") renderSpeakingModule();
-    if (App.activeTab === "drill") renderVocabStage();
+    if (App.activeTab === "drill") {
+      renderVocabStage();
+      renderGrammarStage();
+    }
     showConfigFeedback("Voortgang gewist.");
   });
 }
@@ -3779,6 +4748,7 @@ async function init() {
   try {
     await loadInitialData();
     initVocabControls();
+    initGrammarModule();
     initWritingModule();
     initSpeakingModule();
     renderDashboard();

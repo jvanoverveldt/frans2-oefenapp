@@ -189,10 +189,30 @@
         <div id="vocab-stage" class="drill-stage"></div>
       </div>
       <div id="subtab-grammar" class="subtab-panel">
-        <div class="card empty-module">
-          <h2>Grammatica Coach (Fase 3B)</h2>
-          <p class="muted">Daarna: offline basisregels + 6 B1-oefentypes met LLM-validatie (invul, zinstransformatie, foutenjacht, zinnen combineren, micro-vertaling en mini-productie).</p>
+        <div class="card drill-controls">
+          <div class="drill-select-row">
+            <div class="drill-field drill-field-sm">
+              <label for="gr-pillar-select">Grammaticapijler</label>
+              <select id="gr-pillar-select" class="input"></select>
+            </div>
+            <div class="drill-field">
+              <label for="gr-topic-select">Onderdeel</label>
+              <select id="gr-topic-select" class="input"></select>
+            </div>
+            <div class="drill-status-wrap" id="gr-meta"></div>
+          </div>
+          <div class="mode-bar" id="gr-mode-bar" role="tablist" aria-label="Oefenvorm grammatica"></div>
         </div>
+        <div id="gr-error" class="banner error hidden" role="alert"></div>
+        <div id="gr-stage" class="drill-stage"></div>
+
+        <div class="section-header">
+          <div>
+            <h2>Grammatica-archief</h2>
+            <span class="muted" id="gr-archive-count">Recente gemaakte oefenreeksen en feedback (handig voor de thuisleerkracht)</span>
+          </div>
+        </div>
+        <div id="gr-archive"></div>
       </div>
     </section>
   </main>
