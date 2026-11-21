@@ -1744,13 +1744,65 @@ body {
   color: var(--primary);
 }
 
+.cat-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.cat-badge-lg {
+  font-size: 1rem;
+  padding: 0.38rem 0.95rem;
+}
+
+.cat-onvoldoende {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.cat-bijna {
+  background: var(--warn-soft);
+  color: #b45309;
+  border: 1px solid #fcd34d;
+}
+
+.cat-voldoende {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid #bfdbfe;
+}
+
+.cat-goed {
+  background: var(--ok-soft);
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.cat-excellent {
+  background: #059669;
+  color: #ffffff;
+  border: 1px solid #047857;
+}
+
 .growth-pill {
   font-size: 0.82rem;
   font-weight: 700;
-  padding: 0.2rem 0.6rem;
+  padding: 0.22rem 0.65rem;
   border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.growth-pill.up {
   background: var(--ok-soft);
   color: var(--ok);
+  border-color: #a7f3d0;
 }
 
 .criteria-grid {

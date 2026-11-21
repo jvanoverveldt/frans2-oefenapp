@@ -337,6 +337,21 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function scoreToCategory(pct) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return { id: "onvoldoende", label: "Onvoldoende", rank: 0 };
+  if (n < 45) return { id: "onvoldoende", label: "Onvoldoende", rank: 0 };
+  if (n < 55) return { id: "bijna", label: "Bijna voldoende", rank: 1 };
+  if (n < 70) return { id: "voldoende", label: "Voldoende", rank: 2 };
+  if (n < 85) return { id: "goed", label: "Goed", rank: 3 };
+  return { id: "excellent", label: "Excellent", rank: 4 };
+}
+
+function renderCategoryBadge(pct, large = false) {
+  const cat = scoreToCategory(pct);
+  return `<span class="cat-badge${large ? " cat-badge-lg" : ""} cat-${cat.id}">${cat.label}</span>`;
+}
+
 function speakFrench(text) {
   if (!("speechSynthesis" in window) || !text) return;
   window.speechSynthesis.cancel();
@@ -564,12 +579,16 @@ function renderDashboard() {
         ? "Start een reeks Woordentoets (NL → FR) om je woordenschat actief in te prenten."
         : "Wissel woordenschat af met schrijven, spreken en grammatica.";
 
+  const readinessLabel = readiness.coveredWeight > 0
+    ? scoreToCategory(Math.round((readiness.totalPct / readiness.coveredWeight) * 100)).label
+    : "Nog niet gestart";
+
   document.getElementById("dashboard-kpis").innerHTML = `
     <div class="kpi-card">
-      <div class="kpi-label">Examengereedheid (gewogen)</div>
-      <div class="kpi-value">${readiness.totalPct}%</div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${readiness.totalPct}%"></div></div>
-      <div class="kpi-sub">${readiness.coveredWeight}% van de examendomeinen geoefend</div>
+      <div class="kpi-label">Examenniveau (geoefende delen)</div>
+      <div class="kpi-value" style="font-size:1.35rem;">${escapeHtml(readinessLabel)}</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${readiness.coveredWeight}%"></div></div>
+      <div class="kpi-sub">${readiness.coveredWeight}% van de examenweging geoefend</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Woordenschat (${totalWords} woorden)</div>
@@ -601,7 +620,7 @@ function renderDashboard() {
   document.getElementById("dashboard-exam-cards").innerHTML = domains.map((d) => {
     const st = getDomainStats(d.key);
     const scoreLine = st.count
-      ? `Laatste: <strong>${st.lastScore}%</strong> · Gem.: <strong>${st.avgScore}%</strong> (${st.count}×)`
+      ? `Laatste: <strong>${scoreToCategory(st.lastScore).label}</strong> · Gem.: <strong>${scoreToCategory(st.avgScore).label}</strong> (${st.count}×)`
       : "Nog geen evaluaties";
     return `
       <div class="exam-card">
@@ -682,17 +701,22 @@ function renderDashboard() {
   const historyEl = document.getElementById("dashboard-history");
   const recent = [...App.progress.evaluaties].reverse().slice(0, 8);
   if (!recent.length) {
-    historyEl.innerHTML = `<p class="muted" style="margin:0;">Nog geen AI-evaluaties opgeslagen. Zodra je schrijf-, spreek- of literatuuropdrachten maakt, verschijnen je scores en feedback hier automatisch.</p>`;
+    historyEl.innerHTML = `<p class="muted" style="margin:0;">Nog geen AI-evaluaties opgeslagen. Zodra je schrijf-, spreek- of literatuuropdrachten maakt, verschijnen je evaluaties hier automatisch.</p>`;
   } else {
-    historyEl.innerHTML = `<div class="history-list">${recent.map((e) => `
+    historyEl.innerHTML = `<div class="history-list">${recent.map((e) => {
+      const catBadge = e.poging2
+        ? `${renderCategoryBadge(e.poging1.scorePct)} → ${renderCategoryBadge(e.poging2.scorePct)}`
+        : renderCategoryBadge(e.scorePct);
+      return `
       <div class="history-row${e.domein === "schrijven" && e.id ? " clickable" : ""}" ${e.domein === "schrijven" && e.id ? `data-open-eval="${escapeHtml(e.id)}"` : ""}>
         <div>
           <strong>${escapeHtml(e.titel || e.domein)}</strong>
           <div class="muted">${new Date(e.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(e.submodus || e.domein)}${e.heeftVerbetering ? " · inclusief verbeterpoging" : ""}</div>
         </div>
-        <span class="score-badge">${escapeHtml(e.scorePct)}%</span>
+        <div class="btn-row" style="gap:0.35rem;">${catBadge}</div>
       </div>
-    `).join("")}</div>`;
+    `;
+    }).join("")}</div>`;
   }
 }
 
@@ -1951,21 +1975,30 @@ async function evaluateWritingSubmission() {
 function renderEvalBreakdown(evalObj, prevEval = null, titlePrefix = "") {
   const growthHtml = prevEval
     ? (() => {
-        const diff = evalObj.scorePct - prevEval.scorePct;
-        const sign = diff >= 0 ? "+" : "";
-        return `<span class="growth-pill">Groei: ${prevEval.totaalOp20}/20 → ${evalObj.totaalOp20}/20 (${sign}${diff}%)</span>`;
+        const c1 = scoreToCategory(prevEval.scorePct);
+        const c2 = scoreToCategory(evalObj.scorePct);
+        const improved = evalObj.scorePct > prevEval.scorePct;
+        const label = c1.id !== c2.id
+          ? `${c1.label} → ${c2.label}`
+          : improved
+            ? `Verbeterd binnen ${c2.label}`
+            : `Zelfde niveau (${c2.label})`;
+        return `<span class="growth-pill${improved ? " up" : ""}">${label}</span>`;
       })()
     : "";
 
-  const critHtml = evalObj.criteria.map((cr) => `
+  const critHtml = evalObj.criteria.map((cr) => {
+    const crPct = Math.round(((Number(cr.score) || 0) / Math.max(1, Number(cr.max) || 4)) * 100);
+    return `
     <div class="crit-card">
       <div class="crit-top">
         <span>${escapeHtml(cr.naam || cr.id)}</span>
-        <span class="score-badge">${escapeHtml(cr.score)}/${escapeHtml(cr.max || 4)}</span>
+        ${renderCategoryBadge(crPct)}
       </div>
       <p class="crit-fb">${escapeHtml(cr.feedback)}</p>
     </div>
-  `).join("");
+  `;
+  }).join("");
 
   const foutenHtml = evalObj.fouten.length
     ? `<div class="mistakes-list">${evalObj.fouten.map((f) => `
@@ -1986,7 +2019,7 @@ function renderEvalBreakdown(evalObj, prevEval = null, titlePrefix = "") {
         </div>
         <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
           ${growthHtml}
-          <span class="eval-score-big">${evalObj.totaalOp20}/20 <span style="font-size:1rem;color:var(--muted);">(${evalObj.scorePct}%)</span></span>
+          ${renderCategoryBadge(evalObj.scorePct, true)}
         </div>
       </div>
       ${evalObj.sterktes.length ? `<p style="margin:0 0 0.75rem;font-size:0.9rem;"><strong>Sterke punten:</strong> ${evalObj.sterktes.map(escapeHtml).join(" · ")}</p>` : ""}
@@ -2059,9 +2092,9 @@ function renderWritingArchive() {
 
   wrap.innerHTML = `<div class="archive-list">${items.map((item) => {
     const isOpen = App.write.openArchiveId === item.id;
-    const scoreTxt = item.poging2
-      ? `${item.poging1.scorePct}% → ${item.poging2.scorePct}%`
-      : `${item.scorePct}%`;
+    const catHtml = item.poging2
+      ? `${renderCategoryBadge(item.poging1.scorePct)} → ${renderCategoryBadge(item.poging2.scorePct)}`
+      : renderCategoryBadge(item.scorePct);
 
     const bodyTasks = (item.opdrachten || []).map((t, i) => {
       const p1Text = item.poging1?.teksten?.[i] || "";
@@ -2073,12 +2106,12 @@ function renderWritingArchive() {
           <h4 style="margin:0 0 0.35rem;">${item.opdrachten.length > 1 ? `Opdracht ${i + 1}: ` : ""}${escapeHtml(t.titel)}</h4>
           <p class="muted" style="margin:0 0 0.45rem;">${escapeHtml(t.context)}</p>
           ${t.brontekst ? `<div class="source-message"><span class="source-message-label">Inkomend bericht</span>${escapeHtml(t.brontekst)}</div>` : ""}
-          <strong>Poging 1 (${p1Eval ? `${p1Eval.totaalOp20}/20 · ${p1Eval.scorePct}%` : ""})</strong>
+          <strong>Poging 1 ${p1Eval ? renderCategoryBadge(p1Eval.scorePct) : ""}</strong>
           <div class="archive-text-box">${escapeHtml(p1Text)}</div>
           ${p1Eval ? renderEvalBreakdown(p1Eval, null, "Poging 1") : ""}
           ${p2Eval ? `
             <div style="margin-top:0.85rem;">
-              <strong>Verbeterpoging (${p2Eval.totaalOp20}/20 · ${p2Eval.scorePct}%)</strong>
+              <strong>Verbeterpoging ${renderCategoryBadge(p2Eval.scorePct)}</strong>
               <div class="archive-text-box">${escapeHtml(p2Text)}</div>
               ${renderEvalBreakdown(p2Eval, p1Eval, "Verbeterpoging")}
             </div>
@@ -2094,7 +2127,7 @@ function renderWritingArchive() {
             <strong>${escapeHtml(item.titel)}</strong>
             <div class="muted">${new Date(item.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(item.submodus || "Schrijven")}</div>
           </div>
-          <span class="score-badge">${escapeHtml(scoreTxt)}</span>
+          <div class="btn-row" style="gap:0.35rem;">${catHtml}</div>
         </summary>
         <div class="archive-body">${bodyTasks}</div>
       </details>
@@ -2202,7 +2235,8 @@ function renderWritingModule() {
         return `
           <div class="card" style="margin-bottom:1rem;border-color:#f59e0b;background:var(--warn-soft);">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
-              <strong>✏️ Stap 2: Verbeter je tekst op basis van de feedback (Poging 1: ${p1.totaalOp20}/20 · ${p1.scorePct}%)</strong>
+              <strong>✏️ Stap 2: Verbeter je tekst op basis van de feedback</strong>
+              ${renderCategoryBadge(p1.scorePct)}
             </div>
             <p class="muted" style="margin:0 0 0.55rem;color:#78350f;">Los de onderstaande aandachtspunten zelf op in je tekst hieronder en dien je verbeterde versie in om de oefening af te ronden.</p>
             ${fouten.length ? `<div class="mistakes-list" style="margin-bottom:0;">
