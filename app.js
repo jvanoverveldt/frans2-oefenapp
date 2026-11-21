@@ -1717,7 +1717,13 @@ async function generateWritingAssignment() {
     return;
   }
   const existing = App.progress.schrijfConcept;
-  if (existing && existing.texts?.some((t) => countWords(t) >= 15) && !existing.poging1) {
+  const hasUnfinishedDraft = existing && existing.texts?.some((t) => countWords(t) >= 15) && !existing.poging1;
+  const hasMandatoryRevision = existing && existing.revising && !existing.strict && !existing.poging2;
+  if (hasMandatoryRevision) {
+    if (!confirm("Je zit nog in Stap 2 (Verbeteren & herschrijven). Wil je deze oefening echt afbreken zonder je tekst te verbeteren?")) {
+      return;
+    }
+  } else if (hasUnfinishedDraft) {
     if (!confirm("Je hebt nog een niet-geëvalueerde tekst openstaan. Wil je die vervangen door een nieuwe opdracht?")) {
       return;
     }
@@ -1823,6 +1829,18 @@ async function evaluateWritingSubmission() {
   }
 
   const isRevision = Boolean(c.poging1 && c.revising);
+  if (isRevision) {
+    const unchangedIdx = c.texts.findIndex(
+      (t, i) => normalizeFr(t) === normalizeFr(c.poging1.teksten?.[i] || "")
+    );
+    if (unchangedIdx >= 0) {
+      c.activeTaskIdx = unchangedIdx;
+      renderWritingModule();
+      showWriteError("Pas eerst minstens één verbeterpunt uit de feedback aan in je tekst voordat je opnieuw laat evalueren.");
+      return;
+    }
+  }
+
   stopWriteTimer();
   showWriteError("");
   App.write.evaluating = true;
@@ -1848,7 +1866,9 @@ async function evaluateWritingSubmission() {
 
     if (!isRevision) {
       c.poging1 = attemptSnapshot;
-      c.revising = false;
+      const needsRevision = !c.strict && (avgPct < 85 || taskEvals.some((ev) => (ev.fouten || []).length > 0));
+      c.revising = needsRevision;
+      c.revisionMandatory = needsRevision;
       const archiveId = c.id || `schr_${Date.now()}`;
       c.archiveId = archiveId;
       const subLabel = c.mode === "examen"
@@ -1872,6 +1892,7 @@ async function evaluateWritingSubmission() {
     } else {
       c.poging2 = attemptSnapshot;
       c.revising = false;
+      c.revisionMandatory = false;
       const entry = App.progress.evaluaties.find((e) => e.id === c.archiveId);
       if (entry) {
         entry.poging2 = attemptSnapshot;
@@ -2121,28 +2142,49 @@ function renderWritingModule() {
     </div>
   `;
 
-  // During revision, show previous errors compactly above the editor so student can fix them herself
-  const revisionGuideHtml = c.revising && c.poging1?.perOpdracht?.[idx]?.fouten?.length
-    ? `
-      <div class="card" style="margin-bottom:1rem;border-color:#fcd34d;background:var(--warn-soft);">
-        <strong>✏️ Verbeterpunten uit Poging 1 (${c.poging1.perOpdracht[idx].totaalOp20}/20):</strong>
-        <div class="mistakes-list" style="margin-bottom:0;">
-          ${c.poging1.perOpdracht[idx].fouten.map((f) => `
-            <div class="mistake-item" style="background:#fff;">
-              <span class="mistake-quote">${escapeHtml(f.citaat)}</span> — ${escapeHtml(f.uitleg)}
-              ${f.tip ? ` <span class="muted">(Tip: ${escapeHtml(f.tip)})</span>` : ""}
+  const stepperHtml = !c.strict
+    ? (() => {
+        const step = !c.poging1 ? 1 : c.revising ? 2 : 3;
+        return `
+          <div class="write-stepper" aria-label="Voortgang schrijfopdracht">
+            <span class="step-pill ${step > 1 ? "done" : "active"}">${step > 1 ? "✓ " : ""}1. Eerste versie schrijven</span>
+            <span class="step-sep">→</span>
+            <span class="step-pill ${step === 2 ? "active" : step > 2 ? "done" : ""}">${step > 2 ? "✓ " : ""}2. Verbeteren &amp; herschrijven</span>
+            <span class="step-sep">→</span>
+            <span class="step-pill ${step === 3 ? "done" : ""}">${step === 3 ? "✓ " : ""}3. Afgerond</span>
+          </div>
+        `;
+      })()
+    : "";
+
+  const revisionGuideHtml = c.revising && c.poging1?.perOpdracht?.[idx]
+    ? (() => {
+        const p1 = c.poging1.perOpdracht[idx];
+        const fouten = p1.fouten || [];
+        return `
+          <div class="card" style="margin-bottom:1rem;border-color:#f59e0b;background:var(--warn-soft);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
+              <strong>✏️ Stap 2: Verbeter je tekst op basis van de feedback (Poging 1: ${p1.totaalOp20}/20 · ${p1.scorePct}%)</strong>
             </div>
-          `).join("")}
-        </div>
-      </div>
-    `
+            <p class="muted" style="margin:0 0 0.55rem;color:#78350f;">Los de onderstaande aandachtspunten zelf op in je tekst hieronder en dien je verbeterde versie in om de oefening af te ronden.</p>
+            ${fouten.length ? `<div class="mistakes-list" style="margin-bottom:0;">
+              ${fouten.map((f) => `
+                <div class="mistake-item" style="background:#fff;">
+                  <span class="mistake-quote">${escapeHtml(f.citaat)}</span> — ${escapeHtml(f.uitleg)}
+                  ${f.tip ? ` <span class="muted">(Tip: ${escapeHtml(f.tip)})</span>` : ""}
+                </div>
+              `).join("")}
+            </div>` : `<p class="muted" style="margin:0;">Verfijn je zinsbouw, woordenschat of structuur op basis van de 7-criteria feedback hieronder.</p>`}
+          </div>
+        `;
+      })()
     : "";
 
   const editorBlockHtml = showEditor
     ? `
       <div class="card">
         <label for="write-editor" style="display:block;font-weight:700;font-size:0.9rem;margin-bottom:0.45rem;">
-          Jouw Franse tekst <span class="muted" style="font-weight:400;">(spellingcontrole uitgeschakeld zoals op examen)</span>
+          ${c.revising ? "Verbeterde Franse tekst (Stap 2)" : "Jouw Franse tekst"} <span class="muted" style="font-weight:400;">(spellingcontrole uitgeschakeld zoals op examen)</span>
         </label>
         <textarea id="write-editor" class="write-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Schrijf hier je Franse tekst…">${escapeHtml(text)}</textarea>
         ${renderAccentBar("write-editor")}
@@ -2151,9 +2193,9 @@ function renderWritingModule() {
             ${wc} woorden${task.richtwoorden ? ` (richtlijn: ${escapeHtml(task.richtwoorden)})` : ""}
           </span>
           <div class="btn-row">
-            ${c.revising ? `<button type="button" class="btn btn-secondary" data-write-action="cancel-revise">Annuleer verbeteren</button>` : ""}
+            ${c.revising && !c.revisionMandatory ? `<button type="button" class="btn btn-secondary" data-write-action="cancel-revise">Annuleer verbeteren</button>` : ""}
             <button type="button" class="btn btn-primary" data-write-action="evaluate" ${App.write.evaluating ? "disabled" : ""}>
-              ${App.write.evaluating ? "Evalueren met 7 criteria…" : c.revising ? "Her-evalueer verbeterde tekst" : c.tasks.length > 1 ? "Evalueer beide opdrachten" : "Evalueer tekst"}
+              ${App.write.evaluating ? "Evalueren met 7 criteria…" : c.revising ? "✓ Dien verbeterde tekst in" : c.tasks.length > 1 ? "Evalueer beide opdrachten" : "Evalueer tekst (Stap 1)"}
             </button>
           </div>
         </div>
@@ -2162,10 +2204,10 @@ function renderWritingModule() {
     : `
       <div class="card">
         <div class="stage-toolbar" style="margin-bottom:0.5rem;">
-          <strong>Ingediende tekst (${wc} woorden)</strong>
+          <strong>${c.poging2 ? "✓ Afgeronde verbeterde tekst" : "Ingediende tekst"} (${wc} woorden)</strong>
           <div class="btn-row">
-            ${!c.poging2 ? `<button type="button" class="btn btn-primary btn-sm" data-write-action="start-revise">✏️ Verbeter tekst &amp; her-evalueer</button>` : ""}
-            <button type="button" class="btn btn-secondary btn-sm" data-write-action="clear-concept">Nieuwe opdracht</button>
+            ${!c.poging2 && c.strict ? `<button type="button" class="btn btn-secondary btn-sm" data-write-action="start-revise">✏️ Nabespreken &amp; verbeteren</button>` : ""}
+            <button type="button" class="btn btn-primary btn-sm" data-write-action="clear-concept">✨ Nieuwe opdracht</button>
           </div>
         </div>
         <div class="archive-text-box" style="margin:0;">${escapeHtml(text)}</div>
@@ -2173,7 +2215,7 @@ function renderWritingModule() {
     `;
 
   let evalBlockHtml = "";
-  if (activeEvalAttempt && !c.revising) {
+  if (activeEvalAttempt) {
     const curTaskEval = activeEvalAttempt.perOpdracht?.[idx];
     const prevTaskEval = c.poging2 ? c.poging1?.perOpdracht?.[idx] : null;
     if (curTaskEval) {
@@ -2182,6 +2224,7 @@ function renderWritingModule() {
   }
 
   ws.innerHTML = `
+    ${stepperHtml}
     ${topbarHtml}
     ${taskTabsHtml}
     <div class="write-grid${showHelper ? " with-helper" : ""}">

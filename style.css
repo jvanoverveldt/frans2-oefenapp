@@ -1455,6 +1455,44 @@ body {
 }
 
 /* Tab 2: Writing & Written Interaction */
+.write-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.step-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  background: var(--idle-soft);
+  color: var(--idle);
+  border: 1px solid var(--border);
+}
+
+.step-pill.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.step-pill.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: #a7f3d0;
+}
+
+.step-sep {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .write-topbar {
   display: flex;
   align-items: center;
