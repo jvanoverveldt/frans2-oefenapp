@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Directe HTTP-poort (`8099/tcp`) nu ook rechtstreeks bereikbaar op het thuisnetwerk zonder Home Assistant-login (`http://homeassistant.local:8099`).
+- Automatische HTTP → HTTPS redirect (301) op poort `8443` wanneer een browser per ongeluk `http://` i.p.v. `https://` opent (voorkomt `ERR_EMPTY_RESPONSE`).
+- Interne TLS self-test bij opstarten gelogd in het tabblad Log.
+
 ## 1.0.2
 
 - HTTPS-server verbeterd met per-verbinding TLS-handshake (`TLSThreadingHTTPServer`) en duidelijke TLS-logging zodat afgebroken browser-handshakes andere verbindingen nooit blokkeren.

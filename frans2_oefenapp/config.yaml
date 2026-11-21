@@ -1,5 +1,5 @@
 name: "Frans 2 Oefenapp (B1)"
-version: "1.0.2"
+version: "1.0.3"
 slug: "frans2_oefenapp"
 description: "Oefenapp voor Frans 2 (2de graad doorstroomfinaliteit, niveau B1 — Vlaamse Examencommissie) met woordenschat, grammatica, schrijven en spreken."
 arch:
@@ -16,9 +16,11 @@ ingress_port: 8099
 panel_icon: "mdi:school"
 panel_title: "Frans 2"
 ports:
+  8099/tcp: 8099
   8443/tcp: 8443
 ports_description:
-  8443/tcp: "Optionele HTTPS-poort voor directe microfoonopname op je lokaal netwerk"
+  8099/tcp: "Directe HTTP-poort op je thuisnetwerk (zonder Home Assistant login)"
+  8443/tcp: "Directe HTTPS-poort voor microfoonopname op je thuisnetwerk"
 map:
   - ssl:ro
 options:

@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import signal
+import socket
 import ssl
 import tempfile
 import threading
@@ -47,6 +48,28 @@ class TLSThreadingHTTPServer(ReusableThreadingHTTPServer):
     def process_request_thread(self, request, client_address):
         try:
             request.settimeout(15)
+            first = request.recv(1, socket.MSG_PEEK)
+            if not first:
+                self.shutdown_request(request)
+                return
+            if first != b"\x16":
+                raw_req = request.recv(4096).decode("latin-1", errors="ignore")
+                host_hdr = ""
+                for line in raw_req.splitlines()[1:]:
+                    if line.lower().startswith("host:"):
+                        host_hdr = line.split(":", 1)[1].strip()
+                        break
+                target_host = host_hdr or f"{HTTPS_HOSTNAME or 'homeassistant.local'}:{HTTPS_PORT}"
+                resp = (
+                    f"HTTP/1.1 301 Moved Permanently\r\n"
+                    f"Location: https://{target_host}/\r\n"
+                    f"Content-Length: 0\r\n"
+                    f"Connection: close\r\n\r\n"
+                ).encode("ascii", errors="ignore")
+                request.sendall(resp)
+                print(f"[frans2-https] HTTP->HTTPS redirect voor {client_address[0]} naar https://{target_host}/", flush=True)
+                self.shutdown_request(request)
+                return
             tls_sock = self.ssl_context.wrap_socket(request, server_side=True)
             tls_sock.settimeout(None)
         except ssl.SSLError as exc:
@@ -298,7 +321,16 @@ def start_optional_https_server():
         thread.start()
         HTTPS_ACTIVE = True
         display_host = HTTPS_HOSTNAME or "homeassistant.local"
-        print(f"Frans 2 Oefenapp HTTPS (microfoon) draait op https://{display_host}:{HTTPS_PORT}", flush=True)
+        print(f"Frans 2 Oefenapp HTTPS (microfoon) draait op https://{display_host}:{HTTPS_PORT} (bind: {HOST}:{HTTPS_PORT})", flush=True)
+        try:
+            test_ctx = ssl._create_unverified_context()
+            with socket.create_connection(("127.0.0.1", HTTPS_PORT), timeout=3) as raw_s:
+                with test_ctx.wrap_socket(raw_s, server_hostname=display_host) as tls_s:
+                    tls_s.sendall(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                    reply = tls_s.recv(128).decode("ascii", errors="ignore").splitlines()[0]
+                    print(f"[frans2-https] Interne TLS self-test: {reply}", flush=True)
+        except Exception as exc:
+            print(f"[frans2-https] WAARSCHUWING interne TLS self-test mislukt: {exc}", flush=True)
         return https_server
     except Exception as exc:
         print(f"[frans2] HTTPS kon niet gestart worden (HTTP blijft wel actief): {exc}", flush=True)
