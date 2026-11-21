@@ -1,6 +1,6 @@
 const LOCAL_FALLBACK_KEY = "frans2_progress_fallback_v1";
 const FRENCH_ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "ù", "û", "ô", "î", "ï", "œ"];
-const LEITNER_HOURS = [0, 0, 24, 72, 240];
+const LEITNER_HOURS = [0, 0, 24, 72, 240]; // box 2: 1d, box 3: 3d, box 4 (beheerst): 10d
 const STATUS_LABELS = {
   niet_gestart: "Niet gestart",
   oefenen: "Oefenen",
@@ -23,10 +23,8 @@ const App = {
     hideMode: "none",
     listSearch: "",
     listFilter: "all",
-    quizStyle: "adaptief",
     quizCount: 10,
-    flashDir: "nl-fr",
-    sentenceSource: "local",
+    sentenceSource: "auto", // "auto" (AI if key configured, else local) | "ai" | "local"
     aiBatches: {},
     aiLoading: false,
     aiError: "",
@@ -129,7 +127,7 @@ function scheduleSaveProgress() {
 
 /* ---------- Gemini Client (compact, <= 1500 tokens) ---------- */
 
-async function callGemini({ prompt, systemInstruction = "", jsonMode = false, contents = null, maxOutputTokens = 900 }) {
+async function callGemini({ prompt, systemInstruction = "", jsonMode = false, contents = null, maxOutputTokens = 1400 }) {
   if (!App.serverMode) {
     throw new Error("Start eerst 'python server.py' om Gemini AI-calls te gebruiken.");
   }
@@ -137,7 +135,7 @@ async function callGemini({ prompt, systemInstruction = "", jsonMode = false, co
     model: App.config.model,
     contents: contents || [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.5,
+      temperature: 0.55,
       maxOutputTokens,
       ...(jsonMode ? { responseMimeType: "application/json" } : {}),
     },
@@ -163,11 +161,11 @@ async function callGemini({ prompt, systemInstruction = "", jsonMode = false, co
   return text;
 }
 
-/* ---------- Automatic Per-Word Mastery & Spaced Repetition ---------- */
+/* ---------- Automatic Per-Word Leitner Mastery (3 spaced reps -> Beheerst) ---------- */
 
 function ensureWfBucket(wfId) {
   if (!App.progress.woordvelden[wfId] || typeof App.progress.woordvelden[wfId] !== "object") {
-    App.progress.woordvelden[wfId] = { words: {}, sessions: 0, lastPracticed: null };
+    App.progress.woordvelden[wfId] = { words: {}, lastPracticed: null };
   }
   if (!App.progress.woordvelden[wfId].words || typeof App.progress.woordvelden[wfId].words !== "object") {
     App.progress.woordvelden[wfId].words = {};
@@ -178,7 +176,7 @@ function ensureWfBucket(wfId) {
 function getWordState(wfId, frWord) {
   const w = App.progress.woordvelden[wfId]?.words?.[frWord];
   if (!w) {
-    return { box: 0, seen: 0, correct: 0, wrong: 0, streak: 0, typedCorrect: 0, nextReview: null, lastSeen: null };
+    return { box: 0, seen: 0, correct: 0, wrong: 0, streak: 0, nextReview: null, lastSeen: null };
   }
   return {
     box: Number(w.box) || 0,
@@ -186,7 +184,6 @@ function getWordState(wfId, frWord) {
     correct: Number(w.correct) || 0,
     wrong: Number(w.wrong) || 0,
     streak: Number(w.streak) || 0,
-    typedCorrect: Number(w.typedCorrect) || 0,
     nextReview: w.nextReview || null,
     lastSeen: w.lastSeen || null,
   };
@@ -199,51 +196,41 @@ function isWordDue(ws, nowMs = Date.now()) {
   return Date.parse(ws.nextReview) <= nowMs;
 }
 
-function updateWordMastery(wfId, frWord, outcome, isActiveProduction = true) {
+function updateWordMastery(wfId, frWord, outcome) {
   const bucket = ensureWfBucket(wfId);
   const cur = getWordState(wfId, frWord);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
-  if (outcome === "warmup") {
-    bucket.words[frWord] = { ...cur, seen: cur.seen + 1, lastSeen: nowIso };
-    bucket.lastPracticed = nowIso;
-    scheduleSaveProgress();
-    return bucket.words[frWord];
-  }
-
-  let { box, correct, wrong, streak, typedCorrect } = cur;
+  let { box, correct, wrong, streak, nextReview } = cur;
   const seen = cur.seen + 1;
 
   if (outcome === "exact") {
     correct += 1;
     streak += 1;
-    if (isActiveProduction) {
-      typedCorrect += 1;
-      box = box === 0 ? 2 : Math.min(4, box + 1);
-    } else {
-      // Meerkeuze kan opwarmen tot max. box 2; beheersing (box 3-4) vereist actief schrijven
-      box = Math.min(2, Math.max(box, box + 1));
+    // Box 0/1 -> box 2 (1x foutloos, +1 dag); box 2->3 (+3 dagen) en 3->4 (beheerst, +10 dagen) enkel wanneer herhaling vervallen is
+    if (box <= 1) {
+      box = 2;
+      nextReview = new Date(now + LEITNER_HOURS[2] * 3600 * 1000).toISOString();
+    } else if (isWordDue(cur, now)) {
+      box = Math.min(4, box + 1);
+      nextReview = new Date(now + LEITNER_HOURS[box] * 3600 * 1000).toISOString();
     }
-  } else if (outcome === "accent" || outcome === "article") {
-    wrong += 1;
-    streak = 0;
-    box = Math.max(1, Math.min(box, 2));
   } else {
+    // Fout, accentfout of lidwoordfout -> terug naar box 1 (herhalen)
     wrong += 1;
     streak = 0;
     box = 1;
+    nextReview = nowIso;
   }
 
-  const nextMs = now + (LEITNER_HOURS[box] || 0) * 3600 * 1000;
   bucket.words[frWord] = {
     box,
     seen,
     correct,
     wrong,
     streak,
-    typedCorrect,
-    nextReview: new Date(nextMs).toISOString(),
+    nextReview,
     lastSeen: nowIso,
   };
   bucket.lastPracticed = nowIso;
@@ -255,8 +242,9 @@ function computeWfMetrics(wf) {
   const nowMs = Date.now();
   const total = wf.woorden.length;
   let started = 0;
-  let mastered = 0;
-  let weak = 0;
+  let mastered = 0; // box === 4 (3x foutloos verspreid over de tijd)
+  let inProgress = 0; // box 2-3
+  let weak = 0; // box 1
   let due = 0;
   let sumCorrect = 0;
   let sumWrong = 0;
@@ -264,7 +252,8 @@ function computeWfMetrics(wf) {
   for (const w of wf.woorden) {
     const ws = getWordState(wf.id, w.fr);
     if (ws.seen > 0) started += 1;
-    if (ws.box >= 3) mastered += 1;
+    if (ws.box >= 4) mastered += 1;
+    else if (ws.box >= 2) inProgress += 1;
     if (ws.box === 1) weak += 1;
     if (isWordDue(ws, nowMs)) due += 1;
     sumCorrect += ws.correct;
@@ -280,7 +269,7 @@ function computeWfMetrics(wf) {
     status = masteredPct >= 80 && (accuracy === null || accuracy >= 80) ? "beheerst" : "oefenen";
   }
 
-  return { total, started, mastered, masteredPct, weak, due, attempts, accuracy, status };
+  return { total, started, mastered, inProgress, masteredPct, weak, due, attempts, accuracy, status };
 }
 
 function computeGrMetrics(id) {
@@ -372,6 +361,10 @@ function stripLeadingArticle(str) {
   return normalizeFr(str).replace(/^(?:une|un|des|les|le|la|l')\s*/i, "").trim();
 }
 
+function hasRequiredArticle(rawFr) {
+  return expandAcceptedVariants(rawFr).some((v) => stripLeadingArticle(v) !== v);
+}
+
 function expandAcceptedVariants(rawFr) {
   const cleaned = String(rawFr || "")
     .replace(/\((?:Frankrijk|België|Zwitserland|m|f|pl|mv|ev|informeel|formeel|ook [^)]+|bijv\.? [^)]+)\)/gi, "")
@@ -388,12 +381,10 @@ function expandAcceptedVariants(rawFr) {
     const s = seg.trim();
     if (!s) continue;
     add(s);
-    // e.g. "un(e) docteur" or "ensoleillé(e)"
     if (/\(e\)/i.test(s)) {
       add(s.replace(/\(e\)/gi, ""));
       add(s.replace(/\(e\)/gi, "e"));
     }
-    // e.g. "blanc (blanche)" or "un avocat (une avocate)"
     const paren = s.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
     if (paren) {
       add(paren[1]);
@@ -415,7 +406,6 @@ function checkVocabTypedAnswer(given, expectedFr) {
   for (const v of variants) {
     if (gNoAcc === stripAccents(v)) return "accent";
   }
-  // Check if learner wrote the right noun but omitted the required French article
   for (const v of variants) {
     const bare = stripLeadingArticle(v);
     if (bare && bare !== v) {
@@ -436,7 +426,7 @@ function checkClozeAnswer(given, expected) {
 
 function renderAccentBar(targetInputId = "vocab-answer-input") {
   return `<div class="accent-bar" aria-label="Franse accenten">${FRENCH_ACCENTS.map(
-    (ch) => `<button type="button" class="accent-btn" data-accent="${ch}" data-accent-target="${targetInputId}">${ch}</button>`
+    (ch) => `<button type="button" class="accent-btn" data-accent="${ch}" data-accent-target="${targetInputId}" tabindex="-1">${ch}</button>`
   ).join("")}</div>`;
 }
 
@@ -450,15 +440,17 @@ function insertAtCursor(input, text) {
 }
 
 function renderMasteryDots(box) {
-  const labels = ["Nieuw", "Herhalen", "Op weg", "Goed", "Beheerst"];
-  const dots = [1, 2, 3, 4].map((lvl) => {
+  // 3 stappen richting Beheerst: box 2 = 1/3, box 3 = 2/3, box 4 = 3/3 (Beheerst)
+  const labels = ["Nieuw", "Fout (herhalen)", "1/3 goed (herhaal +1d)", "2/3 goed (herhaal +3d)", "Beheerst (3/3)"];
+  const filledSteps = box >= 2 ? box - 1 : 0;
+  const dots = [1, 2, 3].map((step) => {
     let cls = "mastery-dot";
-    if (box === 1 && lvl === 1) cls += " weak";
-    else if (box >= 3 && lvl <= box) cls += " mastered";
-    else if (lvl <= box) cls += " filled";
+    if (box === 1 && step === 1) cls += " weak";
+    else if (box >= 4) cls += " mastered";
+    else if (step <= filledSteps) cls += " filled";
     return `<span class="${cls}"></span>`;
   }).join("");
-  return `<span class="mastery-dots" title="Niveau: ${labels[box] || "Nieuw"} (${box}/4)">${dots}</span>`;
+  return `<span class="mastery-dots" title="${labels[box] || "Nieuw"}">${dots}</span>`;
 }
 
 function findMatchingWordForGat(wfId, gat) {
@@ -472,6 +464,39 @@ function findMatchingWordForGat(wfId, gat) {
     }
   }
   return null;
+}
+
+function renderPrevFeedbackBar(fb) {
+  if (!fb) return "";
+  const cls = fb.kind === "exact" ? "ok" : (fb.kind === "accent" || fb.kind === "article") ? "warn" : "error";
+  let title = "";
+  if (fb.kind === "exact") {
+    title = `✓ Juist: ${escapeHtml(fb.expected)}`;
+  } else if (fb.kind === "accent") {
+    title = `Bijna (accentfout — komt terug): `;
+  } else if (fb.kind === "article") {
+    title = `Bijna (lidwoord vergeten — komt terug): `;
+  } else {
+    title = `Fout (komt terug): `;
+  }
+
+  const wrongSnippet = fb.kind !== "exact" && fb.given
+    ? `<span class="prev-wrong-strike">${escapeHtml(fb.given)}</span>→ `
+    : "";
+
+  const detailLine = fb.kind === "exact"
+    ? (fb.sub ? `<span class="muted">${escapeHtml(fb.sub)}</span>` : "")
+    : `<div>${wrongSnippet}<strong>${escapeHtml(fb.expected)}</strong>${fb.sub ? ` <span class="muted">(${escapeHtml(fb.sub)})</span>` : ""}</div>`;
+
+  return `
+    <div class="prev-feedback ${cls}" role="status" aria-live="polite">
+      <div class="prev-feedback-detail">
+        <strong>${title}</strong>
+        ${detailLine}
+      </div>
+      <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(fb.speakText || fb.expected)}" title="Luister uitspraak" tabindex="-1">🔊</button>
+    </div>
+  `;
 }
 
 /* ---------- Navigation ---------- */
@@ -510,6 +535,7 @@ function renderDashboard() {
   const wfPracticing = wfStats.filter((x) => x.m.status === "oefenen").length;
   const totalWords = wfStats.reduce((s, x) => s + x.m.total, 0);
   const totalWordsMastered = wfStats.reduce((s, x) => s + x.m.mastered, 0);
+  const totalWordsInProgress = wfStats.reduce((s, x) => s + x.m.inProgress, 0);
   const totalWordsDue = wfStats.reduce((s, x) => s + x.m.due, 0);
 
   const grMastered = grAll.filter((g) => computeGrMetrics(g.id).status === "beheerst").length;
@@ -517,11 +543,11 @@ function renderDashboard() {
   const readiness = computeWeightedReadiness();
 
   const nextTip = totalWordsDue > 0
-    ? `Je hebt ${totalWordsDue} woord(en) klaar voor gespreide herhaling.`
+    ? `${totalWordsDue} woord(en) staan klaar voor gespreide herhaling.`
     : !App.config.hasKey
       ? "Stel je Gemini API-key in bij Instellingen voor AI-zinnen en examenevaluatie."
       : totalWordsMastered < 50
-        ? "Start een reeks 'Toets & Inprenten' om je eerste woorden actief te beheersen."
+        ? "Start een reeks Woordentoets (NL → FR) om je woordenschat actief in te prenten."
         : "Wissel woordenschat af met schrijven, spreken en grammatica.";
 
   document.getElementById("dashboard-kpis").innerHTML = `
@@ -535,7 +561,7 @@ function renderDashboard() {
       <div class="kpi-label">Woordenschat (${totalWords} woorden)</div>
       <div class="kpi-value">${totalWordsMastered} / ${totalWords}</div>
       <div class="progress-bar"><div class="progress-fill ok" style="width:${Math.round((totalWordsMastered / Math.max(1, totalWords)) * 100)}%"></div></div>
-      <div class="kpi-sub">${wfMastered}/23 velden beheerst · ${totalWordsDue} te herhalen</div>
+      <div class="kpi-sub">${totalWordsInProgress} op weg · ${totalWordsDue} te herhalen · ${wfMastered}/23 velden klaar</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Grammatica (4 pijlers)</div>
@@ -546,11 +572,10 @@ function renderDashboard() {
     <div class="kpi-card">
       <div class="kpi-label">Aanbevolen volgende stap</div>
       <div class="kpi-value" style="font-size:1rem;line-height:1.35;margin-top:0.45rem;">${escapeHtml(nextTip)}</div>
-      <div class="kpi-sub">Status wordt automatisch bepaald uit je resultaten</div>
+      <div class="kpi-sub">Beheerst = 3× foutloos NL → FR verspreid over dagen</div>
     </div>
   `;
 
-  // Exam domain cards
   const w = App.curriculum.examen.weging;
   const domains = [
     { key: "schrijven", title: "Schrijven & Interactie", weight: `${w.schrijven}%`, desc: "29% schrijven + 29% schriftelijke interactie · 90 min (2 opdrachten)", tab: "schrijven" },
@@ -580,9 +605,8 @@ function renderDashboard() {
     `;
   }).join("");
 
-  // 23 Woordvelden (read-only status derived strictly from results)
   document.getElementById("wf-summary-text").textContent =
-    `${wfMastered} beheerst · ${wfPracticing} aan het oefenen · ${totalWords} woorden (beheerst vanaf 80% actief gekend)`;
+    `${wfMastered} beheerst · ${wfPracticing} aan het oefenen · ${totalWords} woorden (beheerst bij ≥80% op niveau 3/3)`;
 
   const q = App.wfSearch.trim().toLowerCase();
   const filteredWf = wfStats.filter(({ wf, m }) => {
@@ -601,7 +625,7 @@ function renderDashboard() {
           <div class="wf-fr">${escapeHtml(wf.titel_fr)}</div>
           <div class="progress-bar" style="margin:0.15rem 0;"><div class="progress-fill ok" style="width:${m.masteredPct}%"></div></div>
           <div class="wf-progress-meta">
-            <span>${m.mastered} / ${m.total} beheerst${m.accuracy !== null ? ` · ${m.accuracy}%` : ""}</span>
+            <span>${m.mastered} / ${m.total} beheerst${m.inProgress ? ` (+${m.inProgress} op weg)` : ""}${m.accuracy !== null ? ` · ${m.accuracy}%` : ""}</span>
             ${m.due > 0 ? `<span class="due-badge">↻ ${m.due}</span>` : ""}
           </div>
           <div class="wf-actions">
@@ -612,9 +636,8 @@ function renderDashboard() {
       `).join("")
     : `<div class="card muted">Geen woordvelden gevonden voor deze filter.</div>`;
 
-  // Grammatica (read-only status derived from results)
   document.getElementById("gr-summary-text").textContent =
-    `${grMastered} van ${grAll.length} onderdelen beheerst (automatisch op basis van oefenresultaten)`;
+    `${grMastered} van ${grAll.length} onderdelen beheerst (automatisch bepaald op basis van resultaten)`;
 
   document.getElementById("dashboard-gr-pillars").innerHTML = App.curriculum.grammatica.map((p) => {
     const doneCount = p.onderdelen.filter((o) => computeGrMetrics(o.id).status === "beheerst").length;
@@ -642,7 +665,6 @@ function renderDashboard() {
     `;
   }).join("");
 
-  // Recente evaluaties
   const historyEl = document.getElementById("dashboard-history");
   const recent = [...App.progress.evaluaties].reverse().slice(0, 8);
   if (!recent.length) {
@@ -660,14 +682,13 @@ function renderDashboard() {
   }
 }
 
-/* ---------- Tab 5a: Woordenschat (Uitbreidbaar VOCAB_MODES register) ---------- */
+/* ---------- Tab 5a: Woordenschat (4 strakke, uitbreidbare oefenvormen) ---------- */
 
 const VOCAB_MODES = [
-  { id: "toets", label: "Toets & Inprenten", render: renderVocabQuiz },
+  { id: "toets", label: "Woordentoets (NL → FR)", render: renderVocabQuiz },
   { id: "invul", label: "Invuloefening (Zinnen)", render: renderVocabCloze },
   { id: "zinsbouw", label: "Zinsbouw-puzzel", render: renderVocabBuilder },
   { id: "lijst", label: "Woordenlijst", render: renderVocabList },
-  { id: "flits", label: "Flitskaarten (Opwarming)", render: renderVocabFlashcards },
 ];
 
 function getSelectedVocabFields() {
@@ -715,10 +736,10 @@ function selectPriorityWords(pool, limit) {
   const nowMs = Date.now();
   const scored = pool.map((w) => {
     const ws = getWordState(w.wfId, w.fr);
-    let priority = 3; // already practiced, not due yet
-    if (ws.box === 1) priority = 0; // fout geweest -> hoogste prioriteit
-    else if (isWordDue(ws, nowMs)) priority = 1; // gespreide herhaling vervallen
-    else if (ws.box === 0) priority = 2; // nieuw woord
+    let priority = 3;
+    if (ws.box === 1) priority = 0;
+    else if (isWordDue(ws, nowMs)) priority = 1;
+    else if (ws.box === 0) priority = 2;
     const lastMs = ws.lastSeen ? Date.parse(ws.lastSeen) : 0;
     return { w, priority, lastMs, rand: Math.random() };
   });
@@ -730,14 +751,31 @@ function getBatchCacheKey() {
   return `${App.vocab.scope}::${App.vocab.group}`;
 }
 
+function canUseAi() {
+  return App.serverMode && App.config.hasKey;
+}
+
+function shouldUseAiSentences() {
+  if (App.vocab.sentenceSource === "local") return false;
+  if (App.vocab.sentenceSource === "ai") return true;
+  return canUseAi();
+}
+
 function getActiveSentencePool() {
   const key = getBatchCacheKey();
-  if (App.vocab.sentenceSource === "ai" && App.vocab.aiBatches[key]?.length) {
+  if (shouldUseAiSentences() && App.vocab.aiBatches[key]?.length) {
     return App.vocab.aiBatches[key];
   }
   return getSelectedVocabFields().flatMap((wf) =>
     wf.voorbeelden.map((vb) => ({ ...vb, wfId: wf.id, wfTitel: wf.titel_nl }))
   );
+}
+
+function ensureAiBatchIfAuto() {
+  const key = getBatchCacheKey();
+  if (shouldUseAiSentences() && canUseAi() && !App.vocab.aiBatches[key] && !App.vocab.aiLoading && !App.vocab.aiError) {
+    generateAiVocabSentences();
+  }
 }
 
 function initVocabControls() {
@@ -792,7 +830,7 @@ function renderVocabMeta() {
   if (App.vocab.scope.startsWith("__mix")) {
     const pool = getVocabWordPool();
     const due = pool.filter((w) => isWordDue(getWordState(w.wfId, w.fr))).length;
-    wrap.innerHTML = `<span class="muted">${pool.length} woorden in selectie</span>${due ? `<span class="due-badge">↻ ${due} te herhalen</span>` : ""}`;
+    wrap.innerHTML = `<span class="muted">${pool.length} woorden</span>${due ? `<span class="due-badge">↻ ${due} te herhalen</span>` : ""}`;
     return;
   }
   const wf = App.curriculum.woordvelden.find((w) => w.id === App.vocab.scope);
@@ -834,12 +872,12 @@ function renderVocabStage() {
   mode.render(document.getElementById("vocab-stage"));
 }
 
-/* ---------- Batch AI Sentence Generator (compact <= 1500 tokens) ---------- */
+/* ---------- Batch AI Sentence Generator (2 zinnen per woord, 1 compacte call) ---------- */
 
 async function generateAiVocabSentences() {
   const pool = getVocabWordPool();
   if (!pool.length) return;
-  const targets = selectPriorityWords(pool, 8);
+  const targets = selectPriorityWords(pool, Math.min(7, pool.length));
   const scopeLabel = App.vocab.scope.startsWith("__mix")
     ? "Gemengde B1 woordenschat"
     : getSelectedVocabFields()[0].titel_nl;
@@ -851,13 +889,13 @@ async function generateAiVocabSentences() {
   try {
     const wordLines = targets.map((w) => `- ${w.fr} (${w.nl})`).join("\n");
     const prompt = [
-      `Maak voor een Vlaamse leerling (Frans niveau B1, thema: ${scopeLabel}) precies ${targets.length} gevarieerde, natuurlijke Franse voorbeeldzinnen (8-15 woorden per zin): één zin per doelwoord.`,
+      `Maak voor een Vlaamse leerling (Frans niveau B1, thema: ${scopeLabel}) voor elk van de ${targets.length} doelwoorden precies 2 verschillende, natuurlijke Franse voorbeeldzinnen (8-15 woorden per zin; totaal ${targets.length * 2} zinnen).`,
       `Doelwoorden:\n${wordLines}`,
       `Geef UITSLUITEND een JSON-array terug met objecten: {"targetWord":"exact Frans doelwoord uit de lijst","fr":"Franse zin","nl":"natuurlijke Nederlandse vertaling","gat":"het exacte ingevulde Franse woord/woordgroep zoals het letterlijk in fr staat"}.`,
-      `Regels: "gat" moet letterlijk in "fr" voorkomen, geen lidwoorden/spaties fout, duidelijke context.`,
+      `Regels: "gat" moet letterlijk in "fr" voorkomen, varieer context en tijden (présent, passé composé, futur), duidelijke context zodat de leerling het woord kan afleiden.`,
     ].join("\n\n");
 
-    const parsed = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1100 });
+    const parsed = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1800 });
     if (!Array.isArray(parsed)) throw new Error("Onverwacht antwoordformaat van Gemini.");
 
     const byLower = new Map(targets.map((t) => [t.fr.toLowerCase(), t]));
@@ -865,7 +903,7 @@ async function generateAiVocabSentences() {
     for (const item of parsed) {
       if (!item || typeof item.fr !== "string" || typeof item.nl !== "string" || typeof item.gat !== "string") continue;
       if (!item.fr.includes(item.gat)) continue;
-      const matched = byLower.get(String(item.targetWord || "").toLowerCase()) || targets[valid.length] || targets[0];
+      const matched = byLower.get(String(item.targetWord || "").toLowerCase()) || targets[valid.length % targets.length];
       valid.push({
         fr: item.fr.trim(),
         nl: item.nl.trim(),
@@ -893,58 +931,41 @@ function renderSentenceSourceBar() {
   const key = getBatchCacheKey();
   const aiCount = App.vocab.aiBatches[key]?.length || 0;
   const localCount = getSelectedVocabFields().reduce((s, wf) => s + wf.voorbeelden.length, 0);
-  const usingAi = App.vocab.sentenceSource === "ai" && aiCount > 0;
+  const usingAi = shouldUseAiSentences() && aiCount > 0;
+
+  let statusText = `Lokale cursus (${localCount} voorbeeldzinnen)`;
+  if (App.vocab.aiLoading) statusText = "✨ Verse AI-zinnen (2 per woord) worden opgehaald…";
+  else if (usingAi) statusText = `✨ AI-batch (${aiCount} verse zinnen · 2 per woord op maat van je voortgang)`;
+
   return `
     <div class="ai-batch-bar">
-      <div>
-        <strong>Bron zinnen:</strong>
-        ${usingAi ? `✨ AI-batch (${aiCount} verse zinnen op maat van zwakke woorden)` : `Lokale cursus (${localCount} voorbeeldzinnen)`}
-      </div>
+      <div><strong>Bron zinnen:</strong> ${statusText}</div>
       <div class="btn-row">
         <button type="button" class="chip${!usingAi ? " active" : ""}" data-sent-source="local">Lokaal (${localCount})</button>
         ${aiCount > 0 ? `<button type="button" class="chip${usingAi ? " active" : ""}" data-sent-source="ai">✨ AI-batch (${aiCount})</button>` : ""}
-        <button type="button" class="btn btn-primary btn-sm" data-ai-batch="generate" ${App.vocab.aiLoading ? "disabled" : ""}>
-          ${App.vocab.aiLoading ? "Zinnen genereren…" : aiCount ? "✨ Nieuwe AI-zinnen" : "✨ Genereer AI-zinnen (batch)"}
+        <button type="button" class="btn btn-primary btn-sm" data-ai-batch="generate" ${App.vocab.aiLoading || !canUseAi() ? "disabled" : ""} title="${canUseAi() ? "Haal een nieuwe batch van 2 zinnen per woord op" : "Stel eerst je Gemini API-key in bij Instellingen"}">
+          ${App.vocab.aiLoading ? "Laden…" : aiCount ? "✨ Nieuwe AI-batch" : "✨ Haal AI-zinnen op"}
         </button>
       </div>
     </div>
-    ${App.vocab.aiError ? `<div class="banner error">${escapeHtml(App.vocab.aiError)}</div>` : ""}
+    ${App.vocab.aiError ? `<div class="banner error">${escapeHtml(App.vocab.aiError)} (Valt terug op lokale zinnen.)</div>` : ""}
   `;
 }
 
-/* ---------- Mode 1: Toets & Inprenten (eerlijke toetsing + herhalingslus) ---------- */
-
-function buildMcOptions(target, fullPool) {
-  const distractors = shuffleArray(fullPool.filter((w) => w.fr !== target.fr)).slice(0, 3);
-  return shuffleArray([target, ...distractors]).map((w) => w.fr);
-}
+/* ---------- Mode 1: Snelle Woordentoets NL -> FR (instant Enter-flow, geen meerkeuze) ---------- */
 
 function startQuizSession() {
   const pool = getVocabWordPool();
   const selected = selectPriorityWords(pool, Math.min(App.vocab.quizCount, pool.length));
-  const queue = selected.map((w) => {
-    const ws = getWordState(w.wfId, w.fr);
-    let askMode = "type";
-    if (App.vocab.quizStyle === "mc") askMode = "mc";
-    else if (App.vocab.quizStyle === "adaptief" && ws.box === 0 && pool.length >= 4) askMode = "mc";
-    return {
-      word: w,
-      askMode,
-      options: askMode === "mc" ? buildMcOptions(w, pool) : null,
-      isRetry: false,
-      firstAttemptRecorded: false,
-    };
-  });
   App.vocab.session = {
     type: "toets",
-    queue,
-    initialTotal: queue.length,
+    queue: selected.map((word) => ({ word, isRetry: false, firstRecorded: false })),
+    initialTotal: selected.length,
     firstCorrect: 0,
     firstPartial: 0,
     firstWrong: 0,
     retriesCompleted: 0,
-    answered: false,
-    lastResult: null,
+    prevFeedback: null,
     done: false,
   };
 }
@@ -960,11 +981,7 @@ function renderVocabQuiz(container) {
 
   const controlsHtml = `
     <div class="stage-toolbar">
-      <div class="filter-group">
-        <button type="button" class="chip${App.vocab.quizStyle === "adaptief" ? " active" : ""}" data-quiz-style="adaptief">Adaptief (aanbevolen)</button>
-        <button type="button" class="chip${App.vocab.quizStyle === "type" ? " active" : ""}" data-quiz-style="type">Enkel schrijven (streng)</button>
-        <button type="button" class="chip${App.vocab.quizStyle === "mc" ? " active" : ""}" data-quiz-style="mc">Meerkeuze (opwarming)</button>
-      </div>
+      <span class="muted">Actief <strong>NL → FR</strong> · typ en druk op <strong>Enter</strong> (leeg = weet ik niet)</span>
       <div class="filter-group">
         ${[10, 15, 20].map((n) => `<button type="button" class="chip${App.vocab.quizCount === n ? " active" : ""}" data-quiz-count="${n}">${n} woorden</button>`).join("")}
       </div>
@@ -976,17 +993,18 @@ function renderVocabQuiz(container) {
     container.innerHTML = `
       <div class="card exercise-card">
         ${controlsHtml}
+        ${renderPrevFeedbackBar(s.prevFeedback)}
         <div class="summary-box">
-          <h3>Toets &amp; Inprenten afgerond!</h3>
+          <h3>Reeks voltooid!</h3>
           <div class="summary-score">${pct}%</div>
           <p class="muted">
-            Eerste poging: <strong>${s.firstCorrect}</strong> juist · <strong>${s.firstPartial}</strong> bijna (accent/lidwoord) · <strong>${s.firstWrong}</strong> fout
-            ${s.retriesCompleted ? `<br>Extra ingeprent in herhaalronde: <strong>${s.retriesCompleted}×</strong>` : ""}
+            Eerste poging: <strong>${s.firstCorrect}</strong> juist · <strong>${s.firstPartial}</strong> accent/lidwoord · <strong>${s.firstWrong}</strong> fout
+            ${s.retriesCompleted ? `<br>Extra ingeprent in herhalingslus: <strong>${s.retriesCompleted}×</strong>` : ""}
           </p>
-          <p class="muted">Je per-woord voortgang en herhaaldata zijn automatisch opgeslagen.</p>
+          <p class="muted">Voortgang en Leitner-herhaaldata automatisch opgeslagen.</p>
           <div class="btn-row" style="justify-content:center;margin-top:1rem;">
             <button type="button" class="btn btn-primary" data-quiz-action="restart">Volgende reeks (${App.vocab.quizCount} woorden)</button>
-            <button type="button" class="btn btn-secondary" data-vocab-mode="invul">Oefen in zinnen →</button>
+            <button type="button" class="btn btn-secondary" data-vocab-mode="invul">Oefen nu in zinnen →</button>
           </div>
         </div>
       </div>
@@ -996,155 +1014,102 @@ function renderVocabQuiz(container) {
 
   const cur = s.queue[0];
   const ws = getWordState(cur.word.wfId, cur.word.fr);
-  const remaining = s.queue.length;
-
-  let inputAreaHtml = "";
-  if (cur.askMode === "mc") {
-    inputAreaHtml = `
-      <div class="mc-grid">
-        ${cur.options.map((opt, idx) => {
-          let cls = "mc-option";
-          if (s.answered) {
-            if (opt === cur.word.fr) cls += " is-correct";
-            else if (opt === s.lastResult?.given) cls += " is-wrong";
-          }
-          return `<button type="button" class="${cls}" data-quiz-mc="${idx}" ${s.answered ? "disabled" : ""}>${escapeHtml(opt)}</button>`;
-        }).join("")}
-      </div>
-    `;
-  } else {
-    inputAreaHtml = `
-      <input id="vocab-answer-input" class="quiz-input" type="text" value="${escapeHtml(s.lastResult?.given || "")}" ${s.answered ? "disabled" : ""} spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Typ het Franse woord (inclusief lidwoord indien van toepassing)…" />
-      ${!s.answered ? renderAccentBar("vocab-answer-input") : ""}
-      <div class="btn-row" style="margin-top:0.6rem;">
-        ${!s.answered ? `
-          <button type="button" class="btn btn-primary" data-quiz-action="check">Controleer</button>
-          <button type="button" class="btn btn-secondary" data-quiz-action="reveal">Ik weet het niet</button>
-        ` : ""}
-      </div>
-    `;
-  }
-
-  let feedbackHtml = "";
-  if (s.answered && s.lastResult) {
-    const r = s.lastResult;
-    const cls = r.kind === "exact" ? "ok" : (r.kind === "accent" || r.kind === "article") ? "warn" : "error";
-    const headline =
-      r.kind === "exact"
-        ? (cur.askMode === "mc" ? "Juist herkend! (Komt later nog terug als schrijfoefening)" : "Helemaal juist!")
-        : r.kind === "accent"
-          ? "Bijna! Let op het accent — dit woord komt zo meteen nog eens terug om in te prenten."
-          : r.kind === "article"
-            ? "Juiste stam, maar vergeet het lidwoord niet — komt zo meteen nog eens terug."
-            : "Nog niet gekend — dit woord komt achteraan in deze reeks opnieuw terug als schrijfoefening.";
-
-    feedbackHtml = `
-      <div class="feedback-box ${cls}">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;">
-          <div>
-            <strong>${headline}</strong>
-            <div style="margin-top:0.25rem;font-size:1.05rem;"><strong>${escapeHtml(cur.word.fr)}</strong> — ${escapeHtml(cur.word.nl)}</div>
-          </div>
-          <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(cur.word.fr)}" title="Luister uitspraak">🔊</button>
-        </div>
-      </div>
-      <div class="btn-row" style="margin-top:0.8rem;">
-        <button type="button" class="btn btn-primary" id="btn-quiz-next" data-quiz-action="next">Volgende →</button>
-      </div>
-    `;
-  }
+  const needsArt = hasRequiredArticle(cur.word.fr);
 
   container.innerHTML = `
     <div class="card exercise-card">
       ${controlsHtml}
+      ${renderPrevFeedbackBar(s.prevFeedback)}
       <div class="exercise-progress">
-        <span>Nog <strong>${remaining}</strong> te gaan in deze reeks${cur.word.groep ? ` · ${escapeHtml(cur.word.groep)}` : ""}</span>
+        <span>Nog <strong>${s.queue.length}</strong> te gaan${cur.word.groep ? ` · ${escapeHtml(cur.word.groep)}` : ""}</span>
         <span style="display:inline-flex;align-items:center;gap:0.5rem;">
           ${cur.isRetry ? `<span class="retry-badge">↻ Inprent-herhaling</span>` : ""}
           ${renderMasteryDots(ws.box)}
         </span>
       </div>
       <div class="quiz-prompt-box">
-        <div class="quiz-prompt-label">${cur.askMode === "mc" ? "Kies het juiste Franse woord (opwarming)" : "Vertaal naar het Frans (actief schrijven)"}</div>
+        <div class="quiz-prompt-label">Typ in het Frans</div>
         <div class="quiz-prompt-word">${escapeHtml(cur.word.nl)}</div>
-        ${App.vocab.scope.startsWith("__mix") ? `<div class="muted">${escapeHtml(cur.word.wfTitel)}</div>` : ""}
+        ${needsArt ? `<span class="prompt-hint-pill">met lidwoord</span>` : ""}
+        ${App.vocab.scope.startsWith("__mix") ? `<div class="muted" style="margin-top:0.25rem;">${escapeHtml(cur.word.wfTitel)}</div>` : ""}
       </div>
-      ${inputAreaHtml}
-      ${feedbackHtml}
+      <input id="vocab-answer-input" class="quiz-input" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Typ het Franse woord en druk op Enter…" />
+      ${renderAccentBar("vocab-answer-input")}
+      <div class="btn-row" style="justify-content:space-between;">
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" data-quiz-action="submit">Controleer &amp; volgende ↵</button>
+          <button type="button" class="btn btn-secondary" data-quiz-action="skip" tabindex="-1">Weet ik niet</button>
+        </div>
+        <span class="kbd-hint">↵ Enter = controleer &amp; meteen volgende</span>
+      </div>
     </div>
   `;
 
-  if (!s.answered && cur.askMode === "type") {
-    const inp = document.getElementById("vocab-answer-input");
-    if (inp) inp.focus();
-  }
+  const inp = document.getElementById("vocab-answer-input");
+  if (inp) inp.focus();
 }
 
-function evaluateQuizAttempt(kind, given) {
+function submitQuizInstant(forceSkip = false) {
   const s = App.vocab.session;
-  if (!s || s.type !== "toets" || s.answered) return;
-  const cur = s.queue[0];
+  if (!s || s.type !== "toets" || s.done || !s.queue.length) return;
+  const inp = document.getElementById("vocab-answer-input");
+  const given = forceSkip ? "" : (inp ? inp.value.trim() : "");
+  const cur = s.queue.shift();
+  const kind = !given ? "wrong" : checkVocabTypedAnswer(given, cur.word.fr);
 
-  if (!cur.firstAttemptRecorded) {
-    cur.firstAttemptRecorded = true;
+  if (!cur.firstRecorded) {
+    cur.firstRecorded = true;
     if (kind === "exact") s.firstCorrect += 1;
     else if (kind === "accent" || kind === "article") s.firstPartial += 1;
     else s.firstWrong += 1;
-    updateWordMastery(cur.word.wfId, cur.word.fr, kind, cur.askMode === "type");
+    updateWordMastery(cur.word.wfId, cur.word.fr, kind);
   } else if (kind === "exact") {
     s.retriesCompleted += 1;
   }
 
-  s.answered = true;
-  s.lastResult = { kind, given };
-  renderVocabStage();
-}
-
-function advanceQuizQueue() {
-  const s = App.vocab.session;
-  if (!s || s.type !== "toets" || !s.answered) return;
-  const cur = s.queue.shift();
-  const kind = s.lastResult?.kind;
-
-  // Fout, accentfout of lidwoordfout -> opnieuw achteraan als actieve schrijfoefening om in te prenten!
+  // Fout, accentfout of lidwoordfout -> opnieuw achteraan in de wachtrij (minstens 2 plaatsen verder indien mogelijk)
   if (kind !== "exact") {
-    s.queue.push({
-      word: cur.word,
-      askMode: "type",
-      options: null,
-      isRetry: true,
-      firstAttemptRecorded: true,
-    });
+    const insertAt = Math.min(s.queue.length, Math.max(2, s.queue.length));
+    s.queue.splice(insertAt, 0, { word: cur.word, isRetry: true, firstRecorded: true });
   }
 
-  s.answered = false;
-  s.lastResult = null;
-  if (!s.queue.length) {
-    s.done = true;
-  }
+  s.prevFeedback = {
+    kind,
+    given,
+    expected: cur.word.fr,
+    sub: cur.word.nl,
+    speakText: cur.word.fr,
+  };
+
+  if (!s.queue.length) s.done = true;
   renderVocabStage();
 }
 
-/* ---------- Mode 2: Contextuele invuloefening (Zinnen + AI-batch) ---------- */
+/* ---------- Mode 2: Contextuele invuloefening (Instant Enter-flow + auto AI-batch) ---------- */
 
 function startClozeSession() {
   const pool = shuffleArray(getActiveSentencePool());
-  const items = pool.slice(0, Math.min(8, pool.length));
+  const items = pool.slice(0, Math.min(12, pool.length));
   App.vocab.session = {
     type: "invul",
     queue: items.map((item) => ({ item, isRetry: false, recorded: false })),
     initialTotal: items.length,
     points: 0,
-    answered: false,
-    lastResult: null,
+    prevFeedback: null,
     done: false,
   };
 }
 
 function renderVocabCloze(container) {
+  ensureAiBatchIfAuto();
   if (!App.vocab.session || App.vocab.session.type !== "invul") startClozeSession();
   const s = App.vocab.session;
   const sourceBar = renderSentenceSourceBar();
+
+  if (App.vocab.aiLoading) {
+    container.innerHTML = `${sourceBar}<div class="card empty-module"><p class="muted">Verse B1-voorbeeldzinnen (2 per woord) worden klaargezet…</p></div>`;
+    return;
+  }
 
   if (!s.queue.length && !s.done) {
     container.innerHTML = `${sourceBar}<div class="card muted">Geen voorbeeldzinnen gevonden.</div>`;
@@ -1155,13 +1120,16 @@ function renderVocabCloze(container) {
     const pct = Math.round((s.points / Math.max(1, s.initialTotal)) * 100);
     container.innerHTML = `
       ${sourceBar}
-      <div class="card summary-box">
-        <h3>Invuloefening klaar!</h3>
-        <div class="summary-score">${pct}%</div>
-        <p class="muted">Eerste poging: ${s.points} / ${s.initialTotal} · Per-woord voortgang bijgewerkt</p>
-        <div class="btn-row" style="justify-content:center;margin-top:1rem;">
-          <button type="button" class="btn btn-primary" data-cloze-action="restart">Nieuwe reeks zinnen</button>
-          <button type="button" class="btn btn-secondary" data-vocab-mode="zinsbouw">Ga naar Zinsbouw-puzzel →</button>
+      <div class="card exercise-card">
+        ${renderPrevFeedbackBar(s.prevFeedback)}
+        <div class="summary-box">
+          <h3>Invuloefening voltooid!</h3>
+          <div class="summary-score">${pct}%</div>
+          <p class="muted">Eerste poging: ${s.points} / ${s.initialTotal} · Woordvoortgang automatisch bijgewerkt</p>
+          <div class="btn-row" style="justify-content:center;margin-top:1rem;">
+            <button type="button" class="btn btn-primary" data-cloze-action="restart">Nieuwe reeks</button>
+            <button type="button" class="btn btn-secondary" data-vocab-mode="zinsbouw">Oefen zinsbouw →</button>
+          </div>
         </div>
       </div>
     `;
@@ -1174,64 +1142,41 @@ function renderVocabCloze(container) {
   const before = gapIdx >= 0 ? item.fr.slice(0, gapIdx) : "";
   const after = gapIdx >= 0 ? item.fr.slice(gapIdx + item.gat.length) : "";
 
-  let feedbackHtml = "";
-  if (s.answered && s.lastResult) {
-    const r = s.lastResult;
-    const cls = r.kind === "exact" ? "ok" : r.kind === "accent" ? "warn" : "error";
-    const msg =
-      r.kind === "exact"
-        ? `<strong>Helemaal juist!</strong> ${escapeHtml(item.fr)}`
-        : r.kind === "accent"
-          ? `<strong>Bijna! Let op het accent:</strong> <code>${escapeHtml(item.gat)}</code> (komt nog eens terug)<br>${escapeHtml(item.fr)}`
-          : `<strong>Niet helemaal.</strong> Juiste woord: <strong>${escapeHtml(item.gat)}</strong> (komt achteraan opnieuw terug)<br>${escapeHtml(item.fr)}`;
-    feedbackHtml = `
-      <div class="feedback-box ${cls}">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;">
-          <div>${msg}</div>
-          <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(item.fr)}" title="Luister zin">🔊</button>
-        </div>
-      </div>
-    `;
-  }
-
   container.innerHTML = `
     ${sourceBar}
     <div class="card exercise-card">
+      ${renderPrevFeedbackBar(s.prevFeedback)}
       <div class="exercise-progress">
-        <span>Nog <strong>${s.queue.length}</strong> zin(nen) in deze reeks${item.isAi ? " · ✨ AI-zin" : ""}</span>
+        <span>Nog <strong>${s.queue.length}</strong> zin(nen)${item.isAi ? " · ✨ AI-zin" : ""}</span>
         <span>${cur.isRetry ? `<span class="retry-badge">↻ Herhaalzin</span>` : `Score: ${s.points} / ${s.initialTotal}`}</span>
       </div>
       <div class="muted">Vertaling (hint): <strong>${escapeHtml(item.nl)}</strong></div>
       <div class="cloze-sentence">
-        ${escapeHtml(before)}<input id="cloze-answer" class="cloze-input" type="text" value="${escapeHtml(s.lastResult?.given || "")}" ${s.answered ? "disabled" : ""} spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="…" />${escapeHtml(after)}
+        ${escapeHtml(before)}<input id="cloze-answer" class="cloze-input" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="…" />${escapeHtml(after)}
       </div>
-      ${!s.answered ? renderAccentBar("cloze-answer") : ""}
-      <div class="btn-row">
-        ${!s.answered ? `
-          <button type="button" class="btn btn-primary" data-cloze-action="check">Controleer</button>
-          <button type="button" class="btn btn-secondary" data-cloze-action="reveal">Toon antwoord</button>
-        ` : `
-          <button type="button" class="btn btn-primary" data-cloze-action="next">Volgende →</button>
-        `}
+      ${renderAccentBar("cloze-answer")}
+      <div class="btn-row" style="justify-content:space-between;">
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" data-cloze-action="submit">Controleer &amp; volgende ↵</button>
+          <button type="button" class="btn btn-secondary" data-cloze-action="skip" tabindex="-1">Weet ik niet</button>
+        </div>
+        <span class="kbd-hint">↵ Enter = controleer &amp; meteen volgende</span>
       </div>
-      ${feedbackHtml}
     </div>
   `;
 
-  if (!s.answered) {
-    const inp = document.getElementById("cloze-answer");
-    if (inp) inp.focus();
-  }
+  const inp = document.getElementById("cloze-answer");
+  if (inp) inp.focus();
 }
 
-function submitClozeAnswer(forceWrong = false) {
+function submitClozeInstant(forceSkip = false) {
   const s = App.vocab.session;
-  if (!s || s.type !== "invul" || s.answered) return;
+  if (!s || s.type !== "invul" || s.done || !s.queue.length) return;
   const inp = document.getElementById("cloze-answer");
-  const given = forceWrong ? "" : (inp ? inp.value : "");
-  const cur = s.queue[0];
+  const given = forceSkip ? "" : (inp ? inp.value.trim() : "");
+  const cur = s.queue.shift();
   const item = cur.item;
-  const kind = forceWrong ? "wrong" : checkClozeAnswer(given, item.gat);
+  const kind = !given ? "wrong" : checkClozeAnswer(given, item.gat);
 
   if (!cur.recorded) {
     cur.recorded = true;
@@ -1239,15 +1184,27 @@ function submitClozeAnswer(forceWrong = false) {
     s.points += pts;
     const linkedWord = item.targetWord || findMatchingWordForGat(item.wfId, item.gat);
     if (linkedWord) {
-      updateWordMastery(item.wfId, linkedWord, kind, true);
+      updateWordMastery(item.wfId, linkedWord, kind);
     }
   }
-  s.answered = true;
-  s.lastResult = { kind, given };
+
+  if (kind !== "exact") {
+    s.queue.push({ item, isRetry: true, recorded: true });
+  }
+
+  s.prevFeedback = {
+    kind,
+    given,
+    expected: item.gat,
+    sub: item.fr,
+    speakText: item.fr,
+  };
+
+  if (!s.queue.length) s.done = true;
   renderVocabStage();
 }
 
-/* ---------- Mode 3: Zinsbouw-puzzel (Lokaal + AI-batch) ---------- */
+/* ---------- Mode 3: Zinsbouw-puzzel (Auto AI-batch + lokaal) ---------- */
 
 function splitSentenceForBuilder(fr) {
   const m = fr.trim().match(/^(.*?)([.?!])$/);
@@ -1266,7 +1223,7 @@ function splitSentenceForBuilder(fr) {
 
 function startBuilderSession() {
   const pool = shuffleArray(getActiveSentencePool());
-  const items = pool.slice(0, Math.min(6, pool.length)).map((item) => ({
+  const items = pool.slice(0, Math.min(8, pool.length)).map((item) => ({
     ...item,
     ...splitSentenceForBuilder(item.fr),
   }));
@@ -1284,9 +1241,15 @@ function startBuilderSession() {
 }
 
 function renderVocabBuilder(container) {
+  ensureAiBatchIfAuto();
   if (!App.vocab.session || App.vocab.session.type !== "zinsbouw") startBuilderSession();
   const s = App.vocab.session;
   const sourceBar = renderSentenceSourceBar();
+
+  if (App.vocab.aiLoading) {
+    container.innerHTML = `${sourceBar}<div class="card empty-module"><p class="muted">Verse B1-voorbeeldzinnen (2 per woord) worden klaargezet…</p></div>`;
+    return;
+  }
 
   if (!s.items.length) {
     container.innerHTML = `${sourceBar}<div class="card muted">Geen zinnen beschikbaar.</div>`;
@@ -1303,7 +1266,7 @@ function renderVocabBuilder(container) {
         <p class="muted">${s.points} van ${s.items.length} zinnen zelfstandig correct gebouwd</p>
         <div class="btn-row" style="justify-content:center;margin-top:1rem;">
           <button type="button" class="btn btn-primary" data-builder-action="restart">Nieuwe puzzels</button>
-          <button type="button" class="btn btn-secondary" data-vocab-mode="toets">Terug naar Toets &amp; Inprenten</button>
+          <button type="button" class="btn btn-secondary" data-vocab-mode="toets">Terug naar Woordentoets</button>
         </div>
       </div>
     `;
@@ -1360,7 +1323,7 @@ function renderVocabBuilder(container) {
   `;
 }
 
-/* ---------- Mode 4: Woordenlijst (met automatische mastery-stipjes) ---------- */
+/* ---------- Mode 4: Woordenlijst (studeren/opzoeken + read-only mastery) ---------- */
 
 function renderVocabList(container) {
   const words = getVocabWordPool();
@@ -1372,7 +1335,8 @@ function renderVocabList(container) {
     const ws = getWordState(w.wfId, w.fr);
     if (lf === "nieuw" && ws.box !== 0) return false;
     if (lf === "herhalen" && !(ws.box === 1 || isWordDue(ws))) return false;
-    if (lf === "beheerst" && ws.box < 3) return false;
+    if (lf === "opweg" && !(ws.box >= 2 && ws.box < 4)) return false;
+    if (lf === "beheerst" && ws.box < 4) return false;
     if (q && !w.fr.toLowerCase().includes(q) && !w.nl.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -1388,6 +1352,7 @@ function renderVocabList(container) {
             <button type="button" class="chip${lf === "all" ? " active" : ""}" data-list-filter="all">Alle (${words.length})</button>
             <button type="button" class="chip${lf === "nieuw" ? " active" : ""}" data-list-filter="nieuw">Nieuw</button>
             <button type="button" class="chip${lf === "herhalen" ? " active" : ""}" data-list-filter="herhalen">Herhalen</button>
+            <button type="button" class="chip${lf === "opweg" ? " active" : ""}" data-list-filter="opweg">Op weg</button>
             <button type="button" class="chip${lf === "beheerst" ? " active" : ""}" data-list-filter="beheerst">Beheerst</button>
           </div>
         </div>
@@ -1419,72 +1384,6 @@ function renderVocabList(container) {
   `;
 }
 
-/* ---------- Mode 5: Flitskaarten (enkel opwarming, telt niet als beheersing) ---------- */
-
-function startFlashSession() {
-  const pool = getVocabWordPool();
-  const deck = selectPriorityWords(pool, Math.min(15, pool.length));
-  App.vocab.session = { type: "flits", deck, idx: 0, flipped: false, done: false };
-}
-
-function renderVocabFlashcards(container) {
-  if (!App.vocab.session || App.vocab.session.type !== "flits") startFlashSession();
-  const s = App.vocab.session;
-  const dir = App.vocab.flashDir;
-
-  if (!s.deck.length) {
-    container.innerHTML = `<div class="card muted">Geen woorden in deze selectie.</div>`;
-    return;
-  }
-
-  if (s.done) {
-    container.innerHTML = `
-      <div class="card summary-box">
-        <h3>Opwarming afgerond!</h3>
-        <p class="muted">Klaar voor de echte test? Start <strong>Toets &amp; Inprenten</strong> om je officiële voortgang op te bouwen.</p>
-        <div class="btn-row" style="justify-content:center;margin-top:1rem;">
-          <button type="button" class="btn btn-primary" data-vocab-mode="toets">Start Toets &amp; Inprenten →</button>
-          <button type="button" class="btn btn-secondary" data-flash-action="restart">Nog een opwarmreeks</button>
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  const card = s.deck[s.idx];
-  const frontLang = dir === "nl-fr" ? "Nederlands" : "Frans";
-  const backLang = dir === "nl-fr" ? "Frans" : "Nederlands";
-  const frontText = dir === "nl-fr" ? card.nl : card.fr;
-  const backText = dir === "nl-fr" ? card.fr : card.nl;
-
-  container.innerHTML = `
-    <div class="card">
-      <div class="stage-toolbar">
-        <span class="muted">Opwarming · Kaart <strong>${s.idx + 1} / ${s.deck.length}</strong> (telt niet als beheerst)</span>
-        <div class="filter-group">
-          <button type="button" class="chip${dir === "nl-fr" ? " active" : ""}" data-flash-dir="nl-fr">NL → FR</button>
-          <button type="button" class="chip${dir === "fr-nl" ? " active" : ""}" data-flash-dir="fr-nl">FR → NL</button>
-        </div>
-      </div>
-      <div class="flashcard-wrap">
-        <div class="flashcard${s.flipped ? " flipped" : ""}" data-flash-action="flip" tabindex="0" role="button">
-          <span class="flashcard-lang">${s.flipped ? backLang : frontLang}</span>
-          <span class="flashcard-text">${escapeHtml(s.flipped ? backText : frontText)}</span>
-          <span class="flashcard-hint">${s.flipped ? escapeHtml(frontText) : "Klik op de kaart om om te draaien"}</span>
-          ${(s.flipped || dir === "fr-nl") ? `<button type="button" class="btn btn-secondary btn-sm" data-speak="${escapeHtml(card.fr)}">🔊 Luister Frans</button>` : ""}
-        </div>
-        <div class="flashcard-controls">
-          ${s.flipped ? `
-            <button type="button" class="btn btn-primary" data-flash-action="next">Volgende kaart →</button>
-          ` : `
-            <button type="button" class="btn btn-primary" data-flash-action="flip">Toon vertaling</button>
-          `}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 /* ---------- Vocab Stage Event Delegation ---------- */
 
 function handleVocabStageClick(e) {
@@ -1501,7 +1400,6 @@ function handleVocabStageClick(e) {
     return;
   }
 
-  // AI batch sentences controls
   const srcBtn = e.target.closest("[data-sent-source]");
   if (srcBtn) {
     App.vocab.sentenceSource = srcBtn.dataset.sentSource;
@@ -1515,19 +1413,9 @@ function handleVocabStageClick(e) {
     return;
   }
 
-  // Accent buttons
   const accBtn = e.target.closest("[data-accent]");
   if (accBtn) {
     insertAtCursor(document.getElementById(accBtn.dataset.accentTarget), accBtn.dataset.accent);
-    return;
-  }
-
-  // Quiz controls & actions
-  const qStyle = e.target.closest("[data-quiz-style]");
-  if (qStyle) {
-    App.vocab.quizStyle = qStyle.dataset.quizStyle;
-    startQuizSession();
-    renderVocabStage();
     return;
   }
 
@@ -1539,59 +1427,34 @@ function handleVocabStageClick(e) {
     return;
   }
 
-  const mcBtn = e.target.closest("[data-quiz-mc]");
-  if (mcBtn && App.vocab.session?.type === "toets" && !App.vocab.session.answered) {
-    const cur = App.vocab.session.queue[0];
-    const picked = cur.options[Number(mcBtn.dataset.quizMc)];
-    evaluateQuizAttempt(picked === cur.word.fr ? "exact" : "wrong", picked);
-    return;
-  }
-
   const qAct = e.target.closest("[data-quiz-action]");
   if (qAct && App.vocab.session?.type === "toets") {
     const act = qAct.dataset.quizAction;
     if (act === "restart") {
       startQuizSession();
       renderVocabStage();
-    } else if (act === "check") {
-      const inp = document.getElementById("vocab-answer-input");
-      const given = inp ? inp.value : "";
-      const kind = checkVocabTypedAnswer(given, App.vocab.session.queue[0].word.fr);
-      if (kind !== "empty") evaluateQuizAttempt(kind, given);
-    } else if (act === "reveal") {
-      evaluateQuizAttempt("wrong", "");
-    } else if (act === "next") {
-      advanceQuizQueue();
+    } else if (act === "submit") {
+      submitQuizInstant(false);
+    } else if (act === "skip") {
+      submitQuizInstant(true);
     }
     return;
   }
 
-  // Cloze actions
   const clozeAct = e.target.closest("[data-cloze-action]");
   if (clozeAct && App.vocab.session?.type === "invul") {
-    const s = App.vocab.session;
     const act = clozeAct.dataset.clozeAction;
     if (act === "restart") {
       startClozeSession();
       renderVocabStage();
-    } else if (act === "check") {
-      submitClozeAnswer(false);
-    } else if (act === "reveal") {
-      submitClozeAnswer(true);
-    } else if (act === "next") {
-      const cur = s.queue.shift();
-      if (s.lastResult?.kind !== "exact") {
-        s.queue.push({ item: cur.item, isRetry: true, recorded: true });
-      }
-      s.answered = false;
-      s.lastResult = null;
-      if (!s.queue.length) s.done = true;
-      renderVocabStage();
+    } else if (act === "submit") {
+      submitClozeInstant(false);
+    } else if (act === "skip") {
+      submitClozeInstant(true);
     }
     return;
   }
 
-  // Builder actions
   const pickBtn = e.target.closest("[data-builder-pick]");
   if (pickBtn && App.vocab.session?.type === "zinsbouw" && !App.vocab.session.answered) {
     const s = App.vocab.session;
@@ -1635,7 +1498,7 @@ function handleVocabStageClick(e) {
       if (s.wasCorrect && !s.usedHint) s.points += 1;
       const linkedWord = item.targetWord || findMatchingWordForGat(item.wfId, item.gat);
       if (linkedWord) {
-        updateWordMastery(item.wfId, linkedWord, s.wasCorrect && !s.usedHint ? "exact" : "wrong", true);
+        updateWordMastery(item.wfId, linkedWord, s.wasCorrect && !s.usedHint ? "exact" : "wrong");
       }
     } else if (act === "next") {
       if (s.idx + 1 < s.items.length) {
@@ -1651,7 +1514,6 @@ function handleVocabStageClick(e) {
     return;
   }
 
-  // Word list controls
   const hideBtn = e.target.closest("[data-hide]");
   if (hideBtn) {
     App.vocab.hideMode = hideBtn.dataset.hide;
@@ -1669,37 +1531,6 @@ function handleVocabStageClick(e) {
   const revealEl = e.target.closest("[data-reveal]");
   if (revealEl && revealEl.classList.contains("word-blurred")) {
     revealEl.classList.toggle("revealed");
-    return;
-  }
-
-  // Flashcards (warmup only)
-  const flashDirBtn = e.target.closest("[data-flash-dir]");
-  if (flashDirBtn) {
-    App.vocab.flashDir = flashDirBtn.dataset.flashDir;
-    startFlashSession();
-    renderVocabStage();
-    return;
-  }
-
-  const flashAct = e.target.closest("[data-flash-action]");
-  if (flashAct && App.vocab.session?.type === "flits") {
-    const s = App.vocab.session;
-    const act = flashAct.dataset.flashAction;
-    if (act === "restart") {
-      startFlashSession();
-    } else if (act === "flip") {
-      s.flipped = !s.flipped;
-    } else if (act === "next") {
-      const card = s.deck[s.idx];
-      updateWordMastery(card.wfId, card.fr, "warmup", false);
-      if (s.idx + 1 < s.deck.length) {
-        s.idx += 1;
-        s.flipped = false;
-      } else {
-        s.done = true;
-      }
-    }
-    renderVocabStage();
   }
 }
 
@@ -1873,13 +1704,10 @@ function bindEvents() {
     if (e.key !== "Enter") return;
     if (e.target.id === "vocab-answer-input" && App.vocab.session?.type === "toets") {
       e.preventDefault();
-      if (!App.vocab.session.answered) {
-        const kind = checkVocabTypedAnswer(e.target.value, App.vocab.session.queue[0].word.fr);
-        if (kind !== "empty") evaluateQuizAttempt(kind, e.target.value);
-      }
+      submitQuizInstant(false);
     } else if (e.target.id === "cloze-answer" && App.vocab.session?.type === "invul") {
       e.preventDefault();
-      if (!App.vocab.session.answered) submitClozeAnswer(false);
+      submitClozeInstant(false);
     }
   });
 

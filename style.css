@@ -969,6 +969,70 @@ body {
   border: 1px solid #fcd34d;
 }
 
+.prev-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  margin-bottom: 0.8rem;
+  animation: fadeSlide 0.16s ease-out;
+}
+
+.prev-feedback.ok {
+  background: var(--ok-soft);
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.prev-feedback.warn {
+  background: var(--warn-soft);
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.prev-feedback.error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.prev-feedback-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.prev-wrong-strike {
+  text-decoration: line-through;
+  opacity: 0.75;
+  margin-right: 0.35rem;
+}
+
+.prompt-hint-pill {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+}
+
+.kbd-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .ai-batch-bar {
   display: flex;
   align-items: center;
