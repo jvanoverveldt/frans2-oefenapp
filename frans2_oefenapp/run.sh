@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-DATA_DIR="${DATA_DIR:-/data}"
+export DATA_DIR="${DATA_DIR:-/data}"
 OPTIONS_FILE="${DATA_DIR}/options.json"
 
 eval "$(python3 - "$OPTIONS_FILE" <<'PY'

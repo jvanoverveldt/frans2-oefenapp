@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- `python3` expliciet geïnstalleerd in de Alpine-container (`apk add --no-cache python3 openssl`) zodat de add-on ook op Home Assistant's standaard base image direct opstart.
+- `DATA_DIR` expliciet geëxporteerd in `run.sh` voor s6-overlay compatibiliteit.
+
 ## 1.0.0
 
 - Eerste volledige release als Home Assistant Add-on met Ingress-ondersteuning.
