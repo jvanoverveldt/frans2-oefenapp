@@ -30,6 +30,17 @@ const App = {
     aiError: "",
     session: null,
   },
+  write: {
+    mode: "schrijven", // "schrijven" | "interactie" | "examen"
+    wfId: "wf02",
+    doelId: "informatie",
+    helperOpen: false,
+    loading: false,
+    evaluating: false,
+    timerId: null,
+    timerRunning: false,
+    openArchiveId: null,
+  },
 };
 
 function defaultProgress() {
@@ -40,6 +51,7 @@ function defaultProgress() {
     grammatica: {},
     evaluaties: [],
     zwakkePunten: [],
+    schrijfConcept: null,
   };
 }
 
@@ -53,6 +65,7 @@ function normalizeProgress(raw) {
     grammatica: raw.grammatica && typeof raw.grammatica === "object" ? raw.grammatica : {},
     evaluaties: Array.isArray(raw.evaluaties) ? raw.evaluaties : [],
     zwakkePunten: Array.isArray(raw.zwakkePunten) ? raw.zwakkePunten : [],
+    schrijfConcept: raw.schrijfConcept && typeof raw.schrijfConcept === "object" ? raw.schrijfConcept : null,
   };
 }
 
@@ -511,6 +524,7 @@ function switchTab(tabId, subtabId = null) {
   });
   if (subtabId) switchSubtab(subtabId);
   if (tabId === "dashboard") renderDashboard();
+  if (tabId === "schrijven") renderWritingModule();
   if (tabId === "drill") renderVocabStage();
 }
 
@@ -671,10 +685,10 @@ function renderDashboard() {
     historyEl.innerHTML = `<p class="muted" style="margin:0;">Nog geen AI-evaluaties opgeslagen. Zodra je schrijf-, spreek- of literatuuropdrachten maakt, verschijnen je scores en feedback hier automatisch.</p>`;
   } else {
     historyEl.innerHTML = `<div class="history-list">${recent.map((e) => `
-      <div class="history-row">
+      <div class="history-row${e.domein === "schrijven" && e.id ? " clickable" : ""}" ${e.domein === "schrijven" && e.id ? `data-open-eval="${escapeHtml(e.id)}"` : ""}>
         <div>
           <strong>${escapeHtml(e.titel || e.domein)}</strong>
-          <div class="muted">${new Date(e.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(e.domein)}</div>
+          <div class="muted">${new Date(e.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(e.submodus || e.domein)}${e.heeftVerbetering ? " · inclusief verbeterpoging" : ""}</div>
         </div>
         <span class="score-badge">${escapeHtml(e.scorePct)}%</span>
       </div>
@@ -1534,6 +1548,719 @@ function handleVocabStageClick(e) {
   }
 }
 
+/* ---------- Tab 2: Schrijven & Schriftelijke Interactie (58%) ---------- */
+
+const WRITING_MODES = [
+  { id: "schrijven", label: "Schrijven (29% · 45 min)", minutes: 45, strict: false },
+  { id: "interactie", label: "Schriftelijke interactie (29% · 45 min)", minutes: 45, strict: false },
+  { id: "examen", label: "Strikte Examensimulatie (58% · 90 min)", minutes: 90, strict: true },
+];
+
+function getWritingModeObj(id = App.write.mode) {
+  return WRITING_MODES.find((m) => m.id === id) || WRITING_MODES[0];
+}
+
+function countWords(text) {
+  const cleaned = String(text || "").trim();
+  return cleaned ? cleaned.split(/\s+/).length : 0;
+}
+
+function formatTimer(sec) {
+  const abs = Math.max(0, Math.floor(sec));
+  const m = Math.floor(abs / 60);
+  const s = abs % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function showWriteError(msg) {
+  const el = document.getElementById("write-error");
+  if (!el) return;
+  if (!msg) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function initWritingModule() {
+  const wfSel = document.getElementById("write-wf-select");
+  wfSel.innerHTML = App.curriculum.woordvelden
+    .map((wf) => `<option value="${wf.id}">${String(wf.nummer).padStart(2, "0")} · ${escapeHtml(wf.titel_nl)}</option>`)
+    .join("");
+  wfSel.value = App.write.wfId;
+
+  const doelSel = document.getElementById("write-doel-select");
+  doelSel.innerHTML = App.curriculum.communicatieve_doelen
+    .map((d) => `<option value="${d.id}">${escapeHtml(d.naam)}</option>`)
+    .join("");
+  doelSel.value = App.write.doelId;
+
+  if (App.progress.schrijfConcept?.mode) {
+    App.write.mode = App.progress.schrijfConcept.mode;
+    if (App.progress.schrijfConcept.wfId) {
+      App.write.wfId = App.progress.schrijfConcept.wfId;
+      wfSel.value = App.write.wfId;
+    }
+    if (App.progress.schrijfConcept.doelId) {
+      App.write.doelId = App.progress.schrijfConcept.doelId;
+      doelSel.value = App.write.doelId;
+    }
+  }
+  renderWritingModeBar();
+}
+
+function renderWritingModeBar() {
+  const bar = document.getElementById("write-mode-bar");
+  bar.innerHTML = WRITING_MODES.map(
+    (m) => `<button type="button" class="mode-btn${m.id === App.write.mode ? " active" : ""}" data-write-mode="${m.id}" role="tab">${escapeHtml(m.label)}</button>`
+  ).join("");
+  const setupRow = document.getElementById("write-setup-row");
+  const isExam = App.write.mode === "examen";
+  setupRow.querySelectorAll(".drill-field").forEach((f) => f.classList.toggle("hidden", isExam));
+  document.getElementById("btn-write-random").classList.toggle("hidden", isExam);
+  document.getElementById("btn-write-generate").textContent = isExam
+    ? "✨ Start nieuwe examensimulatie (2 opdrachten)"
+    : "✨ Genereer opdracht";
+}
+
+function stopWriteTimer() {
+  if (App.write.timerId) {
+    clearInterval(App.write.timerId);
+    App.write.timerId = null;
+  }
+  App.write.timerRunning = false;
+}
+
+function startWriteTimer() {
+  const c = App.progress.schrijfConcept;
+  if (!c) return;
+  stopWriteTimer();
+  App.write.timerRunning = true;
+  App.write.timerId = setInterval(() => {
+    const cur = App.progress.schrijfConcept;
+    if (!cur) {
+      stopWriteTimer();
+      return;
+    }
+    if (cur.timerSecondsLeft > 0) {
+      cur.timerSecondsLeft -= 1;
+    } else {
+      cur.timerOvertime = (cur.timerOvertime || 0) + 1;
+    }
+    const disp = document.getElementById("write-timer-display");
+    if (disp) {
+      const over = cur.timerSecondsLeft <= 0;
+      disp.classList.toggle("overtime", over);
+      disp.textContent = over
+        ? `00:00 (tijd om · +${formatTimer(cur.timerOvertime || 0)})`
+        : formatTimer(cur.timerSecondsLeft);
+    }
+    if (cur.timerSecondsLeft % 15 === 0) scheduleSaveProgress();
+  }, 1000);
+}
+
+function pickRandomWritingPair() {
+  const wfs = App.curriculum.woordvelden;
+  const doelen = App.curriculum.communicatieve_doelen;
+  const wf = wfs[Math.floor(Math.random() * wfs.length)];
+  const doel = doelen[Math.floor(Math.random() * doelen.length)];
+  App.write.wfId = wf.id;
+  App.write.doelId = doel.id;
+  document.getElementById("write-wf-select").value = wf.id;
+  document.getElementById("write-doel-select").value = doel.id;
+}
+
+function buildWritingGenPrompt(mode) {
+  const doelen = App.curriculum.communicatieve_doelen;
+  const wfs = App.curriculum.woordvelden;
+
+  if (mode === "examen") {
+    const shuffledWf = shuffleArray(wfs);
+    const shuffledDoel = shuffleArray(doelen);
+    const wf1 = shuffledWf[0];
+    const wf2 = shuffledWf[1];
+    const d1 = shuffledDoel[0];
+    const d2 = shuffledDoel[1];
+    const words1 = shuffleArray(wf1.woorden).slice(0, 8).map((w) => w.fr).join(", ");
+    const words2 = shuffleArray(wf2.woorden).slice(0, 8).map((w) => w.fr).join(", ");
+    return [
+      `Je bent examenmaker voor de Vlaamse Examencommissie 'Frans 2' (2de graad doorstroomfinaliteit, niveau B1).`,
+      `Genereer een realistisch digitaal examen met EXACT 2 opdrachten (totaal 90 min):`,
+      `Opdracht 1 (type "schrijven", 29%): thema "${wf1.titel_nl}" (sfeerwoorden: ${words1}), doel "${d1.naam}" (${d1.beschrijving}). Geen inkomende brontekst nodig (brontekst: "").`,
+      `Opdracht 2 (type "interactie", 29%): thema "${wf2.titel_nl}" (sfeerwoorden: ${words2}), doel "${d2.naam}" (${d2.beschrijving}). Voeg een realistisch kort inkomend Frans bericht/e-mail/forumbericht (50-90 woorden) toe in "brontekst" waarop de leerling moet antwoorden.`,
+      `Geef UITSLUITEND geldig JSON terug: {"opdrachten":[{"type":"schrijven|interactie","titel":"korte NL titel","thema":"...","doel":"...","context":"heldere NL opdrachtomschrijving (2-3 zinnen)","brontekst":"Frans inkomend bericht of lege string","ontvanger":"bv. gemeente / vriend(in)","register":"neutraal/formeel (vous) of informeel (tu)","vereisten":["inhoudspunt 1","inhoudspunt 2","inhoudspunt 3","inhoudspunt 4"],"richtwoorden":"120-160"}]}`,
+    ].join("\n\n");
+  }
+
+  const wf = wfs.find((w) => w.id === App.write.wfId) || wfs[0];
+  const doel = doelen.find((d) => d.id === App.write.doelId) || doelen[0];
+  const sampleWords = shuffleArray(wf.woorden).slice(0, 8).map((w) => w.fr).join(", ");
+  const isInter = mode === "interactie";
+
+  return [
+    `Je bent examenmaker voor de Vlaamse Examencommissie 'Frans 2' (2de graad doorstroomfinaliteit, niveau B1).`,
+    `Maak EXACT 1 realistische ${isInter ? "opdracht Schriftelijke Interactie (reageren op een bericht)" : "Schrijfopdracht"} voor 45 minuten.`,
+    `Thema: ${wf.titel_nl} (${wf.titel_fr}) · inspiratiewoorden: ${sampleWords}.`,
+    `Communicatief doel: ${doel.naam} — ${doel.beschrijving}. Typische tekstsoorten: ${doel.tekstsoorten.join(", ")}.`,
+    isInter
+      ? `Schrijf een authentiek, kort inkomend Frans bericht (e-mail, uitnodiging of forumbericht van 55-90 woorden) in "brontekst" waarop de leerling in het Frans moet reageren.`
+      : `Laat "brontekst" een lege string "".`,
+    `Geef UITSLUITEND geldig JSON terug: {"opdrachten":[{"type":"${mode}","titel":"korte NL titel","thema":"${wf.titel_nl}","doel":"${doel.naam}","context":"heldere NL opdrachtomschrijving (2-3 zinnen)","brontekst":"...","ontvanger":"...","register":"neutraal/formeel (vous) of informeel (tu)","vereisten":["punt 1","punt 2","punt 3","punt 4"],"richtwoorden":"120-160"}]}`,
+  ].join("\n\n");
+}
+
+async function generateWritingAssignment() {
+  if (!canUseAi()) {
+    showWriteError("Stel eerst je Gemini API-key in via Instellingen om examenopdrachten te genereren.");
+    return;
+  }
+  const existing = App.progress.schrijfConcept;
+  if (existing && existing.texts?.some((t) => countWords(t) >= 15) && !existing.poging1) {
+    if (!confirm("Je hebt nog een niet-geëvalueerde tekst openstaan. Wil je die vervangen door een nieuwe opdracht?")) {
+      return;
+    }
+  }
+
+  stopWriteTimer();
+  showWriteError("");
+  App.write.loading = true;
+  App.write.helperOpen = false;
+  renderWritingModule();
+
+  try {
+    const mode = App.write.mode;
+    const modeObj = getWritingModeObj(mode);
+    const data = await callGemini({
+      prompt: buildWritingGenPrompt(mode),
+      jsonMode: true,
+      maxOutputTokens: 1300,
+    });
+    const tasks = Array.isArray(data?.opdrachten) ? data.opdrachten : [];
+    if (!tasks.length) throw new Error("Gemini gaf geen geldige opdracht terug. Probeer opnieuw.");
+
+    const totalSec = modeObj.minutes * 60;
+    App.progress.schrijfConcept = {
+      id: `schr_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      mode,
+      strict: modeObj.strict,
+      wfId: App.write.wfId,
+      doelId: App.write.doelId,
+      tasks,
+      texts: tasks.map(() => ""),
+      scratchpads: tasks.map(() => ""),
+      activeTaskIdx: 0,
+      timerTotalSeconds: totalSec,
+      timerSecondsLeft: totalSec,
+      timerOvertime: 0,
+      poging1: null,
+      poging2: null,
+      revising: false,
+      archiveId: null,
+    };
+    scheduleSaveProgress();
+    startWriteTimer();
+  } catch (err) {
+    showWriteError(err.message);
+  } finally {
+    App.write.loading = false;
+    renderWritingModule();
+  }
+}
+
+async function evaluateSingleTask(task, text, prevEval = null) {
+  const criteriaLines = App.curriculum.examen.beoordelingscriteria
+    .map((c) => `- ${c.id} (${c.naam}): ${c.rubric}`)
+    .join("\n");
+
+  const prevBlock = prevEval
+    ? `\nDit is een VERBETERPOGING na eerdere feedback (vorige score: ${prevEval.totaalOp20}/20). Eerdere aandachtspunten: ${(prevEval.fouten || []).map((f) => f.citaat).join("; ")}. Beoordeel eerlijk op het nieuwe niveau en benoem kort wat verbeterd is.`
+    : "";
+
+  const prompt = [
+    `Beoordeel deze Franse B1-tekst volgens de 7 officiële criteria van de Vlaamse Examencommissie (Frans 2, 2de graad doorstroomfinaliteit).`,
+    `Opdracht (${task.type}): ${task.titel}\nContext: ${task.context}${task.brontekst ? `\nInkomend bericht: ${task.brontekst}` : ""}\nRegister: ${task.register} · Richtlengte: ${task.richtwoorden} woorden\nVereisten: ${(task.vereisten || []).join(" | ")}`,
+    `Tekst van de leerling (${countWords(text)} woorden):\n"""\n${text.trim()}\n"""`,
+    `Beoordelingscriteria (geef alle 7 in het Nederlands):\n${criteriaLines}${prevBlock}`,
+    `Belangrijk: herschrijf NIET de volledige tekst; geef maximaal 3 tot 5 concrete, belangrijkste fouten/verbeterpunten zodat de leerling ze zelf kan verbeteren.`,
+    `Geef UITSLUITEND geldig JSON terug: {"totaalOp20":14,"scorePct":70,"samenvatting":"2 korte NL zinnen","sterktes":["...","..."],"criteria":[{"id":"taakvoltooiing","naam":"Taakvoltooiing","score":3,"max":4,"feedback":"1 korte concrete NL zin"}],"fouten":[{"citaat":"exact stukje uit leerlingtekst","type":"grammatica|spelling|woordenschat|register|structuur","uitleg":"korte NL uitleg waarom fout","tip":"richtinggevende hint om zelf te verbeteren"}]}`,
+  ].join("\n\n");
+
+  const res = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1500 });
+  const scorePct = Number.isFinite(Number(res.scorePct))
+    ? Math.max(0, Math.min(100, Math.round(Number(res.scorePct))))
+    : Math.round(((Number(res.totaalOp20) || 0) / 20) * 100);
+  const totaalOp20 = Number.isFinite(Number(res.totaalOp20))
+    ? Number(res.totaalOp20)
+    : Math.round((scorePct / 100) * 20);
+  return {
+    totaalOp20,
+    scorePct,
+    samenvatting: res.samenvatting || "",
+    sterktes: Array.isArray(res.sterktes) ? res.sterktes : [],
+    criteria: Array.isArray(res.criteria) ? res.criteria : [],
+    fouten: Array.isArray(res.fouten) ? res.fouten : [],
+  };
+}
+
+async function evaluateWritingSubmission() {
+  const c = App.progress.schrijfConcept;
+  if (!c) return;
+  if (!canUseAi()) {
+    showWriteError("Stel eerst je Gemini API-key in via Instellingen om je tekst te laten evalueren.");
+    return;
+  }
+
+  for (let i = 0; i < c.tasks.length; i++) {
+    if (countWords(c.texts[i]) < 15) {
+      c.activeTaskIdx = i;
+      renderWritingModule();
+      showWriteError(`Schrijf minstens 15 woorden bij opdracht ${i + 1} voordat je laat evalueren.`);
+      return;
+    }
+  }
+
+  const isRevision = Boolean(c.poging1 && c.revising);
+  stopWriteTimer();
+  showWriteError("");
+  App.write.evaluating = true;
+  renderWritingModule();
+
+  try {
+    const taskEvals = [];
+    for (let i = 0; i < c.tasks.length; i++) {
+      const prev = isRevision ? c.poging1.perOpdracht[i] : null;
+      const ev = await evaluateSingleTask(c.tasks[i], c.texts[i], prev);
+      taskEvals.push(ev);
+    }
+
+    const avgPct = Math.round(taskEvals.reduce((s, e) => s + e.scorePct, 0) / taskEvals.length);
+    const avg20 = Math.round((taskEvals.reduce((s, e) => s + e.totaalOp20, 0) / taskEvals.length) * 10) / 10;
+    const attemptSnapshot = {
+      datum: new Date().toISOString(),
+      scorePct: avgPct,
+      totaalOp20: avg20,
+      teksten: [...c.texts],
+      perOpdracht: taskEvals,
+    };
+
+    if (!isRevision) {
+      c.poging1 = attemptSnapshot;
+      c.revising = false;
+      const archiveId = c.id || `schr_${Date.now()}`;
+      c.archiveId = archiveId;
+      const subLabel = c.mode === "examen"
+        ? "Strikte examensimulatie (58%)"
+        : c.mode === "interactie"
+          ? "Schriftelijke interactie (29%)"
+          : "Schrijven (29%)";
+      App.progress.evaluaties.push({
+        id: archiveId,
+        datum: attemptSnapshot.datum,
+        domein: "schrijven",
+        submodus: subLabel,
+        titel: c.tasks.map((t) => t.titel).join(" + "),
+        scorePct: avgPct,
+        totaalOp20: avg20,
+        opdrachten: c.tasks,
+        poging1: attemptSnapshot,
+        poging2: null,
+        heeftVerbetering: false,
+      });
+    } else {
+      c.poging2 = attemptSnapshot;
+      c.revising = false;
+      const entry = App.progress.evaluaties.find((e) => e.id === c.archiveId);
+      if (entry) {
+        entry.poging2 = attemptSnapshot;
+        entry.heeftVerbetering = true;
+        entry.verbeterdPct = avgPct;
+      }
+    }
+
+    scheduleSaveProgress();
+  } catch (err) {
+    showWriteError(err.message);
+  } finally {
+    App.write.evaluating = false;
+    renderWritingModule();
+  }
+}
+
+function renderEvalBreakdown(evalObj, prevEval = null, titlePrefix = "") {
+  const growthHtml = prevEval
+    ? (() => {
+        const diff = evalObj.scorePct - prevEval.scorePct;
+        const sign = diff >= 0 ? "+" : "";
+        return `<span class="growth-pill">Groei: ${prevEval.totaalOp20}/20 → ${evalObj.totaalOp20}/20 (${sign}${diff}%)</span>`;
+      })()
+    : "";
+
+  const critHtml = evalObj.criteria.map((cr) => `
+    <div class="crit-card">
+      <div class="crit-top">
+        <span>${escapeHtml(cr.naam || cr.id)}</span>
+        <span class="score-badge">${escapeHtml(cr.score)}/${escapeHtml(cr.max || 4)}</span>
+      </div>
+      <p class="crit-fb">${escapeHtml(cr.feedback)}</p>
+    </div>
+  `).join("");
+
+  const foutenHtml = evalObj.fouten.length
+    ? `<div class="mistakes-list">${evalObj.fouten.map((f) => `
+        <div class="mistake-item">
+          <div><span class="mistake-quote">${escapeHtml(f.citaat)}</span> <span class="muted">(${escapeHtml(f.type)})</span></div>
+          <div style="margin-top:0.25rem;">${escapeHtml(f.uitleg)}</div>
+          ${f.tip ? `<div class="muted" style="margin-top:0.15rem;"><strong>Tip:</strong> ${escapeHtml(f.tip)}</div>` : ""}
+        </div>
+      `).join("")}</div>`
+    : `<p class="muted">Geen grote taalfouten opgemerkt.</p>`;
+
+  return `
+    <div class="eval-card">
+      <div class="eval-header">
+        <div>
+          <h3 style="margin:0;">${titlePrefix ? `${escapeHtml(titlePrefix)} · ` : ""}Beoordeling (7 examencriteria)</h3>
+          <p class="muted" style="margin:0.25rem 0 0;">${escapeHtml(evalObj.samenvatting)}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+          ${growthHtml}
+          <span class="eval-score-big">${evalObj.totaalOp20}/20 <span style="font-size:1rem;color:var(--muted);">(${evalObj.scorePct}%)</span></span>
+        </div>
+      </div>
+      ${evalObj.sterktes.length ? `<p style="margin:0 0 0.75rem;font-size:0.9rem;"><strong>Sterke punten:</strong> ${evalObj.sterktes.map(escapeHtml).join(" · ")}</p>` : ""}
+      <div class="criteria-grid">${critHtml}</div>
+      <h4 style="margin:0.5rem 0 0.35rem;font-size:0.94rem;">Belangrijkste verbeterpunten (om zelf op te lossen)</h4>
+      ${foutenHtml}
+    </div>
+  `;
+}
+
+function renderWritingHelperPanel(concept, taskIdx) {
+  const scratchHtml = `
+    <div>
+      <h4>Kladblad ${concept.strict ? "(enkel leeg kladblad — examenmodus)" : "/ Schrijfplan"}</h4>
+      <textarea id="write-scratchpad" class="scratchpad-editor" spellcheck="false" placeholder="${concept.strict ? "Kernwoorden of structuur…" : "Inleiding:\nMidden (kernpunten):\nSlot:"}">${escapeHtml(concept.scratchpads[taskIdx] || "")}</textarea>
+    </div>
+  `;
+
+  if (concept.strict) {
+    return `<aside class="helper-panel">${scratchHtml}</aside>`;
+  }
+
+  const sig = App.curriculum.examen.signaalwoorden || {};
+  const sigLabels = {
+    chronologisch: "Volgorde",
+    oorzaak_reden: "Oorzaak / reden",
+    gevolg_conclusie: "Gevolg / besluit",
+    tegenstelling_toegeving: "Tegenstelling",
+    opsomming_toelichting: "Opsomming",
+    voorwaarde_doel: "Voorwaarde / doel",
+  };
+  const sigHtml = Object.entries(sig).map(([k, arr]) => `
+    <div class="connector-group">
+      <strong>${sigLabels[k] || k}:</strong>
+      <div class="connector-tags">
+        ${arr.map((w) => `<button type="button" class="connector-tag" data-insert-connector="${escapeHtml(w)}">${escapeHtml(w)}</button>`).join("")}
+      </div>
+    </div>
+  `).join("");
+
+  const critChecklist = App.curriculum.examen.beoordelingscriteria
+    .map((c) => `<li><strong>${escapeHtml(c.naam)}:</strong> ${escapeHtml(c.rubric)}</li>`)
+    .join("");
+
+  return `
+    <aside class="helper-panel">
+      ${scratchHtml}
+      <div>
+        <h4>Signaalwoorden (klik om in te voegen)</h4>
+        ${sigHtml}
+      </div>
+      <div>
+        <h4>Nalees-checklist (7 criteria)</h4>
+        <ul class="req-list" style="font-size:0.8rem;color:var(--muted);">${critChecklist}</ul>
+      </div>
+    </aside>
+  `;
+}
+
+function renderWritingArchive() {
+  const wrap = document.getElementById("write-archive");
+  const countEl = document.getElementById("write-archive-count");
+  const items = App.progress.evaluaties.filter((e) => e.domein === "schrijven").reverse();
+
+  countEl.textContent = `${items.length} opgeslagen schrijfopdracht(en) — uitklapbaar met volledige tekst en 7-criteria feedback`;
+  if (!items.length) {
+    wrap.innerHTML = `<div class="card muted">Nog geen ingediende schrijfopdrachten. Genereer bovenaan je eerste opdracht!</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `<div class="archive-list">${items.map((item) => {
+    const isOpen = App.write.openArchiveId === item.id;
+    const scoreTxt = item.poging2
+      ? `${item.poging1.scorePct}% → ${item.poging2.scorePct}%`
+      : `${item.scorePct}%`;
+
+    const bodyTasks = (item.opdrachten || []).map((t, i) => {
+      const p1Text = item.poging1?.teksten?.[i] || "";
+      const p1Eval = item.poging1?.perOpdracht?.[i];
+      const p2Text = item.poging2?.teksten?.[i] || "";
+      const p2Eval = item.poging2?.perOpdracht?.[i];
+      return `
+        <div style="margin-top:0.9rem;">
+          <h4 style="margin:0 0 0.35rem;">${item.opdrachten.length > 1 ? `Opdracht ${i + 1}: ` : ""}${escapeHtml(t.titel)}</h4>
+          <p class="muted" style="margin:0 0 0.45rem;">${escapeHtml(t.context)}</p>
+          ${t.brontekst ? `<div class="source-message"><span class="source-message-label">Inkomend bericht</span>${escapeHtml(t.brontekst)}</div>` : ""}
+          <strong>Poging 1 (${p1Eval ? `${p1Eval.totaalOp20}/20 · ${p1Eval.scorePct}%` : ""})</strong>
+          <div class="archive-text-box">${escapeHtml(p1Text)}</div>
+          ${p1Eval ? renderEvalBreakdown(p1Eval, null, "Poging 1") : ""}
+          ${p2Eval ? `
+            <div style="margin-top:0.85rem;">
+              <strong>Verbeterpoging (${p2Eval.totaalOp20}/20 · ${p2Eval.scorePct}%)</strong>
+              <div class="archive-text-box">${escapeHtml(p2Text)}</div>
+              ${renderEvalBreakdown(p2Eval, p1Eval, "Verbeterpoging")}
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }).join('<hr class="divider" />');
+
+    return `
+      <details class="archive-item" data-archive-id="${escapeHtml(item.id)}"${isOpen ? " open" : ""}>
+        <summary class="archive-summary">
+          <div>
+            <strong>${escapeHtml(item.titel)}</strong>
+            <div class="muted">${new Date(item.datum).toLocaleDateString("nl-BE")} · ${escapeHtml(item.submodus || "Schrijven")}</div>
+          </div>
+          <span class="score-badge">${escapeHtml(scoreTxt)}</span>
+        </summary>
+        <div class="archive-body">${bodyTasks}</div>
+      </details>
+    `;
+  }).join("")}</div>`;
+}
+
+function renderWritingModule() {
+  if (!App.curriculum) return;
+  renderWritingModeBar();
+  renderWritingArchive();
+
+  const ws = document.getElementById("write-workspace");
+  if (App.write.loading) {
+    ws.innerHTML = `<div class="card empty-module"><p class="muted">✨ Realistische B1-examenopdracht wordt gegenereerd…</p></div>`;
+    return;
+  }
+
+  const c = App.progress.schrijfConcept;
+  if (!c || !c.tasks?.length) {
+    ws.innerHTML = `
+      <div class="card empty-module">
+        <h3>Klaar om te schrijven?</h3>
+        <p class="muted">Kies bovenaan een schrijfmodus (Schrijven, Schriftelijke interactie of Strikte Examensimulatie) en klik op <strong>Genereer opdracht</strong>. Je concept wordt tijdens het typen automatisch op de server bewaard.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const idx = Math.min(c.activeTaskIdx || 0, c.tasks.length - 1);
+  const task = c.tasks[idx];
+  const text = c.texts[idx] || "";
+  const wc = countWords(text);
+  const over = c.timerSecondsLeft <= 0;
+  const tools = App.curriculum.examen.hulpmiddelen || [];
+  const showHelper = c.strict || App.write.helperOpen;
+  const activeEvalAttempt = c.poging2 || c.poging1;
+  const showEditor = !activeEvalAttempt || c.revising;
+
+  const taskTabsHtml = c.tasks.length > 1
+    ? `<div class="write-task-tabs">${c.tasks.map((t, i) => `
+        <button type="button" class="mode-btn${i === idx ? " active" : ""}" data-write-task-idx="${i}">
+          Opdracht ${i + 1}: ${t.type === "interactie" ? "Interactie" : "Schrijven"} (${countWords(c.texts[i])} w.)
+        </button>
+      `).join("")}</div>`
+    : "";
+
+  const topbarHtml = `
+    <div class="write-topbar">
+      <div class="timer-box">
+        <span id="write-timer-display" class="timer-display${over ? " overtime" : ""}">
+          ${over ? `00:00 (tijd om · +${formatTimer(c.timerOvertime || 0)})` : formatTimer(c.timerSecondsLeft)}
+        </span>
+        <button type="button" class="btn btn-secondary btn-sm" data-write-action="toggle-timer">
+          ${App.write.timerRunning ? "Pauzeer" : "Start timer"}
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" data-write-action="reset-timer">Reset</button>
+        <span class="muted" style="font-size:0.78rem;">(indicatief)</span>
+      </div>
+      <div class="btn-row">
+        ${c.strict
+          ? `<span class="exam-strict-badge">Strikte examenmodus · geen oefenhulp</span>`
+          : `<button type="button" class="btn btn-secondary btn-sm" data-write-action="toggle-helper">${App.write.helperOpen ? "Verberg oefenhulp" : "Oefenhulp (kladblad & signaalwoorden)"}</button>`
+        }
+        ${tools.map((tl) => `<a class="btn btn-secondary btn-sm tool-link" href="${escapeHtml(tl.url)}" target="_blank" rel="noopener noreferrer">📖 ${escapeHtml(tl.naam)} ↗</a>`).join("")}
+      </div>
+    </div>
+  `;
+
+  const promptCardHtml = `
+    <div class="prompt-card">
+      <div class="prompt-meta">
+        <span class="weight-pill">${task.type === "interactie" ? "Schriftelijke interactie (29%)" : "Schrijven (29%)"}</span>
+        ${task.thema ? `<span class="chip chip-sm">${escapeHtml(task.thema)}</span>` : ""}
+        ${task.register ? `<span class="chip chip-sm">Register: ${escapeHtml(task.register)}</span>` : ""}
+        ${task.richtwoorden ? `<span class="chip chip-sm">Richtlengte: ${escapeHtml(task.richtwoorden)} woorden</span>` : ""}
+      </div>
+      <h3>${escapeHtml(task.titel)}</h3>
+      <p style="margin:0 0 0.5rem;">${escapeHtml(task.context)}</p>
+      ${task.ontvanger ? `<div class="muted"><strong>Ontvanger:</strong> ${escapeHtml(task.ontvanger)}</div>` : ""}
+      ${task.brontekst ? `<div class="source-message"><span class="source-message-label">Inkomend bericht (om op te reageren)</span>${escapeHtml(task.brontekst)}</div>` : ""}
+      ${task.vereisten?.length ? `<ul class="req-list">${task.vereisten.map((v) => `<li>${escapeHtml(v)}</li>`).join("")}</ul>` : ""}
+    </div>
+  `;
+
+  // During revision, show previous errors compactly above the editor so student can fix them herself
+  const revisionGuideHtml = c.revising && c.poging1?.perOpdracht?.[idx]?.fouten?.length
+    ? `
+      <div class="card" style="margin-bottom:1rem;border-color:#fcd34d;background:var(--warn-soft);">
+        <strong>✏️ Verbeterpunten uit Poging 1 (${c.poging1.perOpdracht[idx].totaalOp20}/20):</strong>
+        <div class="mistakes-list" style="margin-bottom:0;">
+          ${c.poging1.perOpdracht[idx].fouten.map((f) => `
+            <div class="mistake-item" style="background:#fff;">
+              <span class="mistake-quote">${escapeHtml(f.citaat)}</span> — ${escapeHtml(f.uitleg)}
+              ${f.tip ? ` <span class="muted">(Tip: ${escapeHtml(f.tip)})</span>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `
+    : "";
+
+  const editorBlockHtml = showEditor
+    ? `
+      <div class="card">
+        <label for="write-editor" style="display:block;font-weight:700;font-size:0.9rem;margin-bottom:0.45rem;">
+          Jouw Franse tekst <span class="muted" style="font-weight:400;">(spellingcontrole uitgeschakeld zoals op examen)</span>
+        </label>
+        <textarea id="write-editor" class="write-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Schrijf hier je Franse tekst…">${escapeHtml(text)}</textarea>
+        ${renderAccentBar("write-editor")}
+        <div class="editor-footer">
+          <span id="write-word-count" class="word-counter${wc >= 110 ? " in-range" : ""}">
+            ${wc} woorden${task.richtwoorden ? ` (richtlijn: ${escapeHtml(task.richtwoorden)})` : ""}
+          </span>
+          <div class="btn-row">
+            ${c.revising ? `<button type="button" class="btn btn-secondary" data-write-action="cancel-revise">Annuleer verbeteren</button>` : ""}
+            <button type="button" class="btn btn-primary" data-write-action="evaluate" ${App.write.evaluating ? "disabled" : ""}>
+              ${App.write.evaluating ? "Evalueren met 7 criteria…" : c.revising ? "Her-evalueer verbeterde tekst" : c.tasks.length > 1 ? "Evalueer beide opdrachten" : "Evalueer tekst"}
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+    : `
+      <div class="card">
+        <div class="stage-toolbar" style="margin-bottom:0.5rem;">
+          <strong>Ingediende tekst (${wc} woorden)</strong>
+          <div class="btn-row">
+            ${!c.poging2 ? `<button type="button" class="btn btn-primary btn-sm" data-write-action="start-revise">✏️ Verbeter tekst &amp; her-evalueer</button>` : ""}
+            <button type="button" class="btn btn-secondary btn-sm" data-write-action="clear-concept">Nieuwe opdracht</button>
+          </div>
+        </div>
+        <div class="archive-text-box" style="margin:0;">${escapeHtml(text)}</div>
+      </div>
+    `;
+
+  let evalBlockHtml = "";
+  if (activeEvalAttempt && !c.revising) {
+    const curTaskEval = activeEvalAttempt.perOpdracht?.[idx];
+    const prevTaskEval = c.poging2 ? c.poging1?.perOpdracht?.[idx] : null;
+    if (curTaskEval) {
+      evalBlockHtml = renderEvalBreakdown(curTaskEval, prevTaskEval, c.poging2 ? "Verbeterpoging" : "Poging 1");
+    }
+  }
+
+  ws.innerHTML = `
+    ${topbarHtml}
+    ${taskTabsHtml}
+    <div class="write-grid${showHelper ? " with-helper" : ""}">
+      <div>
+        ${promptCardHtml}
+        ${revisionGuideHtml}
+        ${editorBlockHtml}
+        ${evalBlockHtml}
+      </div>
+      ${showHelper ? renderWritingHelperPanel(c, idx) : ""}
+    </div>
+  `;
+}
+
+function handleWritingWorkspaceClick(e) {
+  const c = App.progress.schrijfConcept;
+  const accBtn = e.target.closest("[data-accent]");
+  if (accBtn) {
+    const el = document.getElementById(accBtn.dataset.accentTarget);
+    insertAtCursor(el, accBtn.dataset.accent);
+    if (el && el.id === "write-editor" && c) {
+      c.texts[c.activeTaskIdx || 0] = el.value;
+      scheduleSaveProgress();
+    }
+    return;
+  }
+
+  const connBtn = e.target.closest("[data-insert-connector]");
+  if (connBtn && c) {
+    const el = document.getElementById("write-editor");
+    if (el) {
+      insertAtCursor(el, `${connBtn.dataset.insertConnector} `);
+      c.texts[c.activeTaskIdx || 0] = el.value;
+      const wcEl = document.getElementById("write-word-count");
+      if (wcEl) wcEl.textContent = `${countWords(el.value)} woorden`;
+      scheduleSaveProgress();
+    }
+    return;
+  }
+
+  const taskBtn = e.target.closest("[data-write-task-idx]");
+  if (taskBtn && c) {
+    c.activeTaskIdx = Number(taskBtn.dataset.writeTaskIdx);
+    renderWritingModule();
+    return;
+  }
+
+  const actBtn = e.target.closest("[data-write-action]");
+  if (!actBtn || !c) return;
+  const act = actBtn.dataset.writeAction;
+  if (act === "toggle-timer") {
+    if (App.write.timerRunning) stopWriteTimer();
+    else startWriteTimer();
+    renderWritingModule();
+  } else if (act === "reset-timer") {
+    stopWriteTimer();
+    c.timerSecondsLeft = c.timerTotalSeconds;
+    c.timerOvertime = 0;
+    scheduleSaveProgress();
+    renderWritingModule();
+  } else if (act === "toggle-helper") {
+    App.write.helperOpen = !App.write.helperOpen;
+    renderWritingModule();
+  } else if (act === "evaluate") {
+    evaluateWritingSubmission();
+  } else if (act === "start-revise") {
+    c.revising = true;
+    renderWritingModule();
+  } else if (act === "cancel-revise") {
+    c.revising = false;
+    renderWritingModule();
+  } else if (act === "clear-concept") {
+    stopWriteTimer();
+    App.progress.schrijfConcept = null;
+    scheduleSaveProgress();
+    renderWritingModule();
+  }
+}
+
 /* ---------- Settings Modal ---------- */
 
 function updateApiIndicator() {
@@ -1663,6 +2390,53 @@ function bindEvents() {
     if (wfBtn) openVocabField(wfBtn.dataset.openWf);
     const grBtn = e.target.closest("[data-open-gr]");
     if (grBtn) switchTab("drill", "grammar");
+    const evalRow = e.target.closest("[data-open-eval]");
+    if (evalRow) {
+      App.write.openArchiveId = evalRow.dataset.openEval;
+      switchTab("schrijven");
+      const target = document.querySelector(`[data-archive-id="${CSS.escape(App.write.openArchiveId)}"]`);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  document.getElementById("write-mode-bar").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-write-mode]");
+    if (!btn) return;
+    App.write.mode = btn.dataset.writeMode;
+    renderWritingModeBar();
+  });
+
+  document.getElementById("write-wf-select").addEventListener("change", (e) => {
+    App.write.wfId = e.target.value;
+  });
+
+  document.getElementById("write-doel-select").addEventListener("change", (e) => {
+    App.write.doelId = e.target.value;
+  });
+
+  document.getElementById("btn-write-random").addEventListener("click", pickRandomWritingPair);
+  document.getElementById("btn-write-generate").addEventListener("click", generateWritingAssignment);
+
+  const writeWs = document.getElementById("write-workspace");
+  writeWs.addEventListener("click", handleWritingWorkspaceClick);
+  writeWs.addEventListener("input", (e) => {
+    const c = App.progress.schrijfConcept;
+    if (!c) return;
+    const idx = c.activeTaskIdx || 0;
+    if (e.target.id === "write-editor") {
+      c.texts[idx] = e.target.value;
+      const wc = countWords(e.target.value);
+      const wcEl = document.getElementById("write-word-count");
+      if (wcEl) {
+        const richt = c.tasks[idx]?.richtwoorden;
+        wcEl.textContent = `${wc} woorden${richt ? ` (richtlijn: ${richt})` : ""}`;
+        wcEl.classList.toggle("in-range", wc >= 110);
+      }
+      scheduleSaveProgress();
+    } else if (e.target.id === "write-scratchpad") {
+      c.scratchpads[idx] = e.target.value;
+      scheduleSaveProgress();
+    }
   });
 
   document.getElementById("vocab-wf-select").addEventListener("change", (e) => {
@@ -1735,10 +2509,12 @@ function bindEvents() {
   });
   document.getElementById("btn-reset-progress").addEventListener("click", () => {
     if (!confirm("Weet je zeker dat je alle voortgang wilt wissen?")) return;
+    stopWriteTimer();
     App.progress = defaultProgress();
     App.vocab.session = null;
     scheduleSaveProgress();
     renderDashboard();
+    if (App.activeTab === "schrijven") renderWritingModule();
     if (App.activeTab === "drill") renderVocabStage();
     showConfigFeedback("Voortgang gewist.");
   });
@@ -1749,6 +2525,7 @@ async function init() {
   try {
     await loadInitialData();
     initVocabControls();
+    initWritingModule();
     renderDashboard();
   } catch (err) {
     showBanner(`Fout bij opstarten: ${err.message}`, true);

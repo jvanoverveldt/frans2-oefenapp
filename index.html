@@ -93,12 +93,36 @@
       <div class="card" id="dashboard-history"></div>
     </section>
 
-    <!-- TAB 2: SCHRIJVEN (FASE 4) -->
+    <!-- TAB 2: SCHRIJVEN & SCHRIFTELIJKE INTERACTIE (58%) -->
     <section id="tab-schrijven" class="tab-panel">
-      <div class="card empty-module">
-        <h2>Schrijven &amp; Schriftelijke Interactie (58%)</h2>
-        <p class="muted">Wordt uitgebouwd in <strong>Fase 4</strong>: AI-examenopdrachten uit de 6 communicatieve doelen, 45/90 min afteltimer, schrijfveld zonder spellingcontrole, Van Dale &amp; Spelling.nu snelkoppelingen, en beoordeling op alle 7 examencriteria.</p>
+      <div class="card drill-controls">
+        <div class="mode-bar" id="write-mode-bar" style="border-top:none;padding-top:0;" role="tablist" aria-label="Schrijfmodus"></div>
+        <div class="drill-select-row" id="write-setup-row">
+          <div class="drill-field">
+            <label for="write-wf-select">Thema (woordveld)</label>
+            <select id="write-wf-select" class="input"></select>
+          </div>
+          <div class="drill-field">
+            <label for="write-doel-select">Communicatief doel</label>
+            <select id="write-doel-select" class="input"></select>
+          </div>
+          <div class="btn-row">
+            <button id="btn-write-random" class="btn btn-secondary" type="button" title="Kies een willekeurig thema en doel">🎲 Willekeurig</button>
+            <button id="btn-write-generate" class="btn btn-primary" type="button">✨ Genereer opdracht</button>
+          </div>
+        </div>
       </div>
+
+      <div id="write-error" class="banner error hidden" role="alert"></div>
+      <div id="write-workspace"></div>
+
+      <div class="section-header">
+        <div>
+          <h2>Schrijfarchief</h2>
+          <span class="muted" id="write-archive-count">Eerdere opdrachten, teksten en 7-criteria feedback (ook handig voor de thuisleerkracht)</span>
+        </div>
+      </div>
+      <div id="write-archive"></div>
     </section>
 
     <!-- TAB 3: SPREKEN & GESPREK (FASE 5) -->
