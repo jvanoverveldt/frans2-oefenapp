@@ -1,5 +1,6 @@
 const LOCAL_FALLBACK_KEY = "frans2_progress_fallback_v1";
 const FRENCH_ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "ù", "û", "ô", "î", "ï", "œ"];
+const LEITNER_HOURS = [0, 0, 24, 72, 240];
 const STATUS_LABELS = {
   niet_gestart: "Niet gestart",
   oefenen: "Oefenen",
@@ -17,17 +18,25 @@ const App = {
   saveTimer: null,
   vocab: {
     scope: "wf01",
-    mode: "lijst",
+    group: "__all",
+    mode: "toets",
     hideMode: "none",
+    listSearch: "",
+    listFilter: "all",
+    quizStyle: "adaptief",
+    quizCount: 10,
     flashDir: "nl-fr",
-    flashHardOnly: false,
+    sentenceSource: "local",
+    aiBatches: {},
+    aiLoading: false,
+    aiError: "",
     session: null,
   },
 };
 
 function defaultProgress() {
   return {
-    version: 1,
+    version: 2,
     updatedAt: null,
     woordvelden: {},
     grammatica: {},
@@ -40,7 +49,7 @@ function normalizeProgress(raw) {
   const base = defaultProgress();
   if (!raw || typeof raw !== "object") return base;
   return {
-    version: 1,
+    version: 2,
     updatedAt: raw.updatedAt || null,
     woordvelden: raw.woordvelden && typeof raw.woordvelden === "object" ? raw.woordvelden : {},
     grammatica: raw.grammatica && typeof raw.grammatica === "object" ? raw.grammatica : {},
@@ -128,7 +137,7 @@ async function callGemini({ prompt, systemInstruction = "", jsonMode = false, co
     model: App.config.model,
     contents: contents || [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.4,
+      temperature: 0.5,
       maxOutputTokens,
       ...(jsonMode ? { responseMimeType: "application/json" } : {}),
     },
@@ -154,54 +163,177 @@ async function callGemini({ prompt, systemInstruction = "", jsonMode = false, co
   return text;
 }
 
-/* ---------- Progress Helpers ---------- */
+/* ---------- Automatic Per-Word Mastery & Spaced Repetition ---------- */
 
-function getWfProgress(id) {
-  const raw = App.progress.woordvelden[id] || {};
+function ensureWfBucket(wfId) {
+  if (!App.progress.woordvelden[wfId] || typeof App.progress.woordvelden[wfId] !== "object") {
+    App.progress.woordvelden[wfId] = { words: {}, sessions: 0, lastPracticed: null };
+  }
+  if (!App.progress.woordvelden[wfId].words || typeof App.progress.woordvelden[wfId].words !== "object") {
+    App.progress.woordvelden[wfId].words = {};
+  }
+  return App.progress.woordvelden[wfId];
+}
+
+function getWordState(wfId, frWord) {
+  const w = App.progress.woordvelden[wfId]?.words?.[frWord];
+  if (!w) {
+    return { box: 0, seen: 0, correct: 0, wrong: 0, streak: 0, typedCorrect: 0, nextReview: null, lastSeen: null };
+  }
   return {
-    status: raw.status || "niet_gestart",
-    score: raw.score ?? null,
-    attempts: raw.attempts || 0,
-    hardWords: Array.isArray(raw.hardWords) ? raw.hardWords : [],
-    lastPracticed: raw.lastPracticed || null,
+    box: Number(w.box) || 0,
+    seen: Number(w.seen) || 0,
+    correct: Number(w.correct) || 0,
+    wrong: Number(w.wrong) || 0,
+    streak: Number(w.streak) || 0,
+    typedCorrect: Number(w.typedCorrect) || 0,
+    nextReview: w.nextReview || null,
+    lastSeen: w.lastSeen || null,
   };
 }
 
-function setWfStatus(id, status) {
-  const cur = getWfProgress(id);
-  App.progress.woordvelden[id] = { ...cur, status, lastPracticed: new Date().toISOString() };
-  scheduleSaveProgress();
-  renderDashboard();
-  if (App.activeTab === "drill") renderVocabMeta();
+function isWordDue(ws, nowMs = Date.now()) {
+  if (ws.box <= 0) return false;
+  if (ws.box === 1) return true;
+  if (!ws.nextReview) return true;
+  return Date.parse(ws.nextReview) <= nowMs;
 }
 
-function recordWfScore(id, scorePct) {
-  const cur = getWfProgress(id);
-  const pct = Math.max(0, Math.min(100, Math.round(scorePct)));
-  let status = cur.status;
-  if (pct >= 80) status = "beheerst";
-  else if (status === "niet_gestart") status = "oefenen";
-  App.progress.woordvelden[id] = {
-    ...cur,
-    status,
-    score: pct,
-    attempts: cur.attempts + 1,
-    lastPracticed: new Date().toISOString(),
+function updateWordMastery(wfId, frWord, outcome, isActiveProduction = true) {
+  const bucket = ensureWfBucket(wfId);
+  const cur = getWordState(wfId, frWord);
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  if (outcome === "warmup") {
+    bucket.words[frWord] = { ...cur, seen: cur.seen + 1, lastSeen: nowIso };
+    bucket.lastPracticed = nowIso;
+    scheduleSaveProgress();
+    return bucket.words[frWord];
+  }
+
+  let { box, correct, wrong, streak, typedCorrect } = cur;
+  const seen = cur.seen + 1;
+
+  if (outcome === "exact") {
+    correct += 1;
+    streak += 1;
+    if (isActiveProduction) {
+      typedCorrect += 1;
+      box = box === 0 ? 2 : Math.min(4, box + 1);
+    } else {
+      // Meerkeuze kan opwarmen tot max. box 2; beheersing (box 3-4) vereist actief schrijven
+      box = Math.min(2, Math.max(box, box + 1));
+    }
+  } else if (outcome === "accent" || outcome === "article") {
+    wrong += 1;
+    streak = 0;
+    box = Math.max(1, Math.min(box, 2));
+  } else {
+    wrong += 1;
+    streak = 0;
+    box = 1;
+  }
+
+  const nextMs = now + (LEITNER_HOURS[box] || 0) * 3600 * 1000;
+  bucket.words[frWord] = {
+    box,
+    seen,
+    correct,
+    wrong,
+    streak,
+    typedCorrect,
+    nextReview: new Date(nextMs).toISOString(),
+    lastSeen: nowIso,
   };
+  bucket.lastPracticed = nowIso;
   scheduleSaveProgress();
-  renderVocabMeta();
+  return bucket.words[frWord];
 }
 
-function toggleHardWord(wfId, frWord) {
-  const cur = getWfProgress(wfId);
-  const set = new Set(cur.hardWords);
-  if (set.has(frWord)) set.delete(frWord);
-  else set.add(frWord);
-  App.progress.woordvelden[wfId] = { ...cur, hardWords: [...set] };
-  scheduleSaveProgress();
+function computeWfMetrics(wf) {
+  const nowMs = Date.now();
+  const total = wf.woorden.length;
+  let started = 0;
+  let mastered = 0;
+  let weak = 0;
+  let due = 0;
+  let sumCorrect = 0;
+  let sumWrong = 0;
+
+  for (const w of wf.woorden) {
+    const ws = getWordState(wf.id, w.fr);
+    if (ws.seen > 0) started += 1;
+    if (ws.box >= 3) mastered += 1;
+    if (ws.box === 1) weak += 1;
+    if (isWordDue(ws, nowMs)) due += 1;
+    sumCorrect += ws.correct;
+    sumWrong += ws.wrong;
+  }
+
+  const attempts = sumCorrect + sumWrong;
+  const accuracy = attempts > 0 ? Math.round((sumCorrect / attempts) * 100) : null;
+  const masteredPct = total > 0 ? Math.round((mastered / total) * 100) : 0;
+
+  let status = "niet_gestart";
+  if (started > 0 || attempts > 0) {
+    status = masteredPct >= 80 && (accuracy === null || accuracy >= 80) ? "beheerst" : "oefenen";
+  }
+
+  return { total, started, mastered, masteredPct, weak, due, attempts, accuracy, status };
 }
 
-/* ---------- Shared Drill Utilities ---------- */
+function computeGrMetrics(id) {
+  const raw = App.progress.grammatica[id] || {};
+  const attempts = Number(raw.attempts) || 0;
+  const score = raw.score ?? null;
+  let status = "niet_gestart";
+  if (attempts > 0) {
+    status = score !== null && score >= 80 && attempts >= 2 ? "beheerst" : "oefenen";
+  }
+  return { status, score, attempts };
+}
+
+function getDomainStats(domain) {
+  const list = App.progress.evaluaties.filter((e) => e.domein === domain);
+  if (!list.length) {
+    return { status: "niet_gestart", count: 0, lastScore: null, avgScore: null };
+  }
+  const scores = list.map((e) => Number(e.scorePct)).filter((n) => Number.isFinite(n));
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  const last = scores.length ? scores[scores.length - 1] : null;
+  const status = avg !== null && avg >= 75 && scores.length >= 2 ? "beheerst" : "oefenen";
+  return { status, count: list.length, lastScore: last, avgScore: avg };
+}
+
+function computeWeightedReadiness() {
+  const w = App.curriculum.examen.weging;
+  const parts = [
+    { weight: w.schrijven, stats: getDomainStats("schrijven") },
+    { weight: w.monoloog, stats: getDomainStats("monoloog") },
+    { weight: w.gesprek, stats: getDomainStats("gesprek") },
+    { weight: w.literatuurbeleving, stats: getDomainStats("literatuur") },
+  ];
+  let weightedSum = 0;
+  let coveredWeight = 0;
+  for (const p of parts) {
+    if (p.stats.avgScore !== null) {
+      weightedSum += (p.stats.avgScore * p.weight) / 100;
+      coveredWeight += p.weight;
+    }
+  }
+  return { totalPct: Math.round(weightedSum), coveredWeight };
+}
+
+/* ---------- Shared Drill & French Utilities ---------- */
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 function speakFrench(text) {
   if (!("speechSynthesis" in window) || !text) return;
@@ -236,7 +368,64 @@ function stripAccents(str) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function checkFrenchAnswer(given, expected) {
+function stripLeadingArticle(str) {
+  return normalizeFr(str).replace(/^(?:une|un|des|les|le|la|l')\s*/i, "").trim();
+}
+
+function expandAcceptedVariants(rawFr) {
+  const cleaned = String(rawFr || "")
+    .replace(/\((?:Frankrijk|België|Zwitserland|m|f|pl|mv|ev|informeel|formeel|ook [^)]+|bijv\.? [^)]+)\)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const variants = new Set();
+  const add = (v) => {
+    const n = normalizeFr(v);
+    if (n) variants.add(n);
+  };
+
+  for (const seg of cleaned.split(/\s*\/\s*/)) {
+    const s = seg.trim();
+    if (!s) continue;
+    add(s);
+    // e.g. "un(e) docteur" or "ensoleillé(e)"
+    if (/\(e\)/i.test(s)) {
+      add(s.replace(/\(e\)/gi, ""));
+      add(s.replace(/\(e\)/gi, "e"));
+    }
+    // e.g. "blanc (blanche)" or "un avocat (une avocate)"
+    const paren = s.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+    if (paren) {
+      add(paren[1]);
+      add(paren[2]);
+    }
+    add(s.replace(/\([^)]*\)/g, ""));
+  }
+  return [...variants];
+}
+
+function checkVocabTypedAnswer(given, expectedFr) {
+  const g = normalizeFr(given);
+  if (!g) return "empty";
+  const variants = expandAcceptedVariants(expectedFr);
+  for (const v of variants) {
+    if (g === v) return "exact";
+  }
+  const gNoAcc = stripAccents(g);
+  for (const v of variants) {
+    if (gNoAcc === stripAccents(v)) return "accent";
+  }
+  // Check if learner wrote the right noun but omitted the required French article
+  for (const v of variants) {
+    const bare = stripLeadingArticle(v);
+    if (bare && bare !== v) {
+      if (g === bare || gNoAcc === stripAccents(bare)) return "article";
+    }
+  }
+  return "wrong";
+}
+
+function checkClozeAnswer(given, expected) {
   const g = normalizeFr(given);
   const e = normalizeFr(expected);
   if (!g) return "empty";
@@ -245,9 +434,9 @@ function checkFrenchAnswer(given, expected) {
   return "wrong";
 }
 
-function renderAccentBar() {
+function renderAccentBar(targetInputId = "vocab-answer-input") {
   return `<div class="accent-bar" aria-label="Franse accenten">${FRENCH_ACCENTS.map(
-    (ch) => `<button type="button" class="accent-btn" data-accent="${ch}">${ch}</button>`
+    (ch) => `<button type="button" class="accent-btn" data-accent="${ch}" data-accent-target="${targetInputId}">${ch}</button>`
   ).join("")}</div>`;
 }
 
@@ -260,46 +449,29 @@ function insertAtCursor(input, text) {
   input.setSelectionRange(start + text.length, start + text.length);
 }
 
-function getGrProgress(id) {
-  return App.progress.grammatica[id] || { status: "niet_gestart", score: null, attempts: 0 };
+function renderMasteryDots(box) {
+  const labels = ["Nieuw", "Herhalen", "Op weg", "Goed", "Beheerst"];
+  const dots = [1, 2, 3, 4].map((lvl) => {
+    let cls = "mastery-dot";
+    if (box === 1 && lvl === 1) cls += " weak";
+    else if (box >= 3 && lvl <= box) cls += " mastered";
+    else if (lvl <= box) cls += " filled";
+    return `<span class="${cls}"></span>`;
+  }).join("");
+  return `<span class="mastery-dots" title="Niveau: ${labels[box] || "Nieuw"} (${box}/4)">${dots}</span>`;
 }
 
-function setGrStatus(id, status) {
-  const cur = getGrProgress(id);
-  App.progress.grammatica[id] = { ...cur, status, lastPracticed: new Date().toISOString() };
-  scheduleSaveProgress();
-  renderDashboard();
-}
-
-function getDomainStats(domain) {
-  const list = App.progress.evaluaties.filter((e) => e.domein === domain);
-  if (!list.length) {
-    return { status: "niet_gestart", count: 0, lastScore: null, avgScore: null };
-  }
-  const scores = list.map((e) => Number(e.scorePct)).filter((n) => Number.isFinite(n));
-  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-  const last = scores.length ? scores[scores.length - 1] : null;
-  const status = avg !== null && avg >= 75 && scores.length >= 2 ? "beheerst" : "oefenen";
-  return { status, count: list.length, lastScore: last, avgScore: avg };
-}
-
-function computeWeightedReadiness() {
-  const w = App.curriculum.examen.weging;
-  const parts = [
-    { weight: w.schrijven, stats: getDomainStats("schrijven") },
-    { weight: w.monoloog, stats: getDomainStats("monoloog") },
-    { weight: w.gesprek, stats: getDomainStats("gesprek") },
-    { weight: w.literatuurbeleving, stats: getDomainStats("literatuur") },
-  ];
-  let weightedSum = 0;
-  let coveredWeight = 0;
-  for (const p of parts) {
-    if (p.stats.avgScore !== null) {
-      weightedSum += (p.stats.avgScore * p.weight) / 100;
-      coveredWeight += p.weight;
+function findMatchingWordForGat(wfId, gat) {
+  const wf = App.curriculum.woordvelden.find((w) => w.id === wfId);
+  if (!wf || !gat) return null;
+  const g = stripAccents(gat);
+  for (const w of wf.woorden) {
+    for (const v of expandAcceptedVariants(w.fr)) {
+      const bare = stripAccents(stripLeadingArticle(v));
+      if (bare === g || stripAccents(v) === g) return w.fr;
     }
   }
-  return { totalPct: Math.round(weightedSum), coveredWeight };
+  return null;
 }
 
 /* ---------- Navigation ---------- */
@@ -326,41 +498,31 @@ function switchSubtab(subtabId) {
   });
 }
 
-/* ---------- Tab 1: Dashboard ---------- */
-
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function renderStatusSelect(currentStatus, dataAttr, id) {
-  const opts = Object.entries(STATUS_LABELS)
-    .map(([val, label]) => `<option value="${val}"${val === currentStatus ? " selected" : ""}>${label}</option>`)
-    .join("");
-  return `<select class="status-select status-${currentStatus}" data-${dataAttr}="${escapeHtml(id)}" aria-label="Status">${opts}</select>`;
-}
+/* ---------- Tab 1: Dashboard (100% automatisch berekend) ---------- */
 
 function renderDashboard() {
   if (!App.curriculum || !App.progress) return;
   const wfList = App.curriculum.woordvelden;
   const grAll = App.curriculum.grammatica.flatMap((p) => p.onderdelen);
 
-  const wfMastered = wfList.filter((w) => getWfProgress(w.id).status === "beheerst").length;
-  const wfPracticing = wfList.filter((w) => getWfProgress(w.id).status === "oefenen").length;
-  const grMastered = grAll.filter((g) => getGrProgress(g.id).status === "beheerst").length;
-  const grPracticing = grAll.filter((g) => getGrProgress(g.id).status === "oefenen").length;
+  const wfStats = wfList.map((wf) => ({ wf, m: computeWfMetrics(wf) }));
+  const wfMastered = wfStats.filter((x) => x.m.status === "beheerst").length;
+  const wfPracticing = wfStats.filter((x) => x.m.status === "oefenen").length;
+  const totalWords = wfStats.reduce((s, x) => s + x.m.total, 0);
+  const totalWordsMastered = wfStats.reduce((s, x) => s + x.m.mastered, 0);
+  const totalWordsDue = wfStats.reduce((s, x) => s + x.m.due, 0);
+
+  const grMastered = grAll.filter((g) => computeGrMetrics(g.id).status === "beheerst").length;
+  const grPracticing = grAll.filter((g) => computeGrMetrics(g.id).status === "oefenen").length;
   const readiness = computeWeightedReadiness();
 
-  const nextTip = !App.config.hasKey
-    ? "Stel je Gemini API-key in bij Instellingen voor AI-feedback."
-    : wfMastered < 5
-      ? "Oefen een paar woordvelden om je basiswoordenschat op te bouwen."
-      : getDomainStats("schrijven").count === 0
-        ? "Maak je eerste schrijfopdracht (58% van het examen)."
-        : "Blijf afwisselen tussen schrijven, spreken en grammatica.";
+  const nextTip = totalWordsDue > 0
+    ? `Je hebt ${totalWordsDue} woord(en) klaar voor gespreide herhaling.`
+    : !App.config.hasKey
+      ? "Stel je Gemini API-key in bij Instellingen voor AI-zinnen en examenevaluatie."
+      : totalWordsMastered < 50
+        ? "Start een reeks 'Toets & Inprenten' om je eerste woorden actief te beheersen."
+        : "Wissel woordenschat af met schrijven, spreken en grammatica.";
 
   document.getElementById("dashboard-kpis").innerHTML = `
     <div class="kpi-card">
@@ -370,10 +532,10 @@ function renderDashboard() {
       <div class="kpi-sub">${readiness.coveredWeight}% van de examendomeinen geoefend</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Woordenschat (23 velden)</div>
-      <div class="kpi-value">${wfMastered} / ${wfList.length}</div>
-      <div class="progress-bar"><div class="progress-fill ok" style="width:${Math.round((wfMastered / wfList.length) * 100)}%"></div></div>
-      <div class="kpi-sub">${wfPracticing} bezig met oefenen · ${wfList.length - wfMastered - wfPracticing} niet gestart</div>
+      <div class="kpi-label">Woordenschat (${totalWords} woorden)</div>
+      <div class="kpi-value">${totalWordsMastered} / ${totalWords}</div>
+      <div class="progress-bar"><div class="progress-fill ok" style="width:${Math.round((totalWordsMastered / Math.max(1, totalWords)) * 100)}%"></div></div>
+      <div class="kpi-sub">${wfMastered}/23 velden beheerst · ${totalWordsDue} te herhalen</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Grammatica (4 pijlers)</div>
@@ -382,9 +544,9 @@ function renderDashboard() {
       <div class="kpi-sub">${grPracticing} bezig met oefenen · ${grAll.length - grMastered - grPracticing} niet gestart</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Volgende stap</div>
-      <div class="kpi-value" style="font-size:1.05rem;line-height:1.35;margin-top:0.45rem;">${escapeHtml(nextTip)}</div>
-      <div class="kpi-sub">${App.progress.evaluaties.length} AI-evaluatie(s) opgeslagen</div>
+      <div class="kpi-label">Aanbevolen volgende stap</div>
+      <div class="kpi-value" style="font-size:1rem;line-height:1.35;margin-top:0.45rem;">${escapeHtml(nextTip)}</div>
+      <div class="kpi-sub">Status wordt automatisch bepaald uit je resultaten</div>
     </div>
   `;
 
@@ -418,52 +580,52 @@ function renderDashboard() {
     `;
   }).join("");
 
-  // 23 Woordvelden
+  // 23 Woordvelden (read-only status derived strictly from results)
   document.getElementById("wf-summary-text").textContent =
-    `${wfMastered} beheerst · ${wfPracticing} aan het oefenen · 460 kernwoorden`;
+    `${wfMastered} beheerst · ${wfPracticing} aan het oefenen · ${totalWords} woorden (beheerst vanaf 80% actief gekend)`;
 
   const q = App.wfSearch.trim().toLowerCase();
-  const filteredWf = wfList.filter((wf) => {
-    const st = getWfProgress(wf.id).status;
-    if (App.wfFilter !== "all" && st !== App.wfFilter) return false;
+  const filteredWf = wfStats.filter(({ wf, m }) => {
+    if (App.wfFilter !== "all" && m.status !== App.wfFilter) return false;
     if (q && !wf.titel_nl.toLowerCase().includes(q) && !wf.titel_fr.toLowerCase().includes(q)) return false;
     return true;
   });
 
   document.getElementById("dashboard-wf-grid").innerHTML = filteredWf.length
-    ? filteredWf.map((wf) => {
-        const prog = getWfProgress(wf.id);
-        const scoreTxt = prog.score !== null ? ` · ${prog.score}%` : "";
-        return `
-          <div class="wf-card">
-            <div class="wf-head">
-              <span class="wf-num">${String(wf.nummer).padStart(2, "0")}</span>
-              <span class="wf-title">${escapeHtml(wf.titel_nl)}</span>
-            </div>
-            <div class="wf-fr">${escapeHtml(wf.titel_fr)}${scoreTxt}</div>
-            <div class="wf-actions">
-              ${renderStatusSelect(prog.status, "wf-status", wf.id)}
-              <button class="btn btn-secondary btn-sm" type="button" data-open-wf="${wf.id}">Oefen</button>
-            </div>
+    ? filteredWf.map(({ wf, m }) => `
+        <div class="wf-card">
+          <div class="wf-head">
+            <span class="wf-num">${String(wf.nummer).padStart(2, "0")}</span>
+            <span class="wf-title">${escapeHtml(wf.titel_nl)}</span>
           </div>
-        `;
-      }).join("")
+          <div class="wf-fr">${escapeHtml(wf.titel_fr)}</div>
+          <div class="progress-bar" style="margin:0.15rem 0;"><div class="progress-fill ok" style="width:${m.masteredPct}%"></div></div>
+          <div class="wf-progress-meta">
+            <span>${m.mastered} / ${m.total} beheerst${m.accuracy !== null ? ` · ${m.accuracy}%` : ""}</span>
+            ${m.due > 0 ? `<span class="due-badge">↻ ${m.due}</span>` : ""}
+          </div>
+          <div class="wf-actions">
+            <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
+            <button class="btn btn-secondary btn-sm" type="button" data-open-wf="${wf.id}">Oefen</button>
+          </div>
+        </div>
+      `).join("")
     : `<div class="card muted">Geen woordvelden gevonden voor deze filter.</div>`;
 
-  // Grammatica (4 pijlers)
+  // Grammatica (read-only status derived from results)
   document.getElementById("gr-summary-text").textContent =
-    `${grMastered} van ${grAll.length} onderdelen beheerst`;
+    `${grMastered} van ${grAll.length} onderdelen beheerst (automatisch op basis van oefenresultaten)`;
 
   document.getElementById("dashboard-gr-pillars").innerHTML = App.curriculum.grammatica.map((p) => {
-    const doneCount = p.onderdelen.filter((o) => getGrProgress(o.id).status === "beheerst").length;
+    const doneCount = p.onderdelen.filter((o) => computeGrMetrics(o.id).status === "beheerst").length;
     const items = p.onderdelen.map((o) => {
-      const prog = getGrProgress(o.id);
-      const scoreTxt = prog.score !== null ? ` (${prog.score}%)` : "";
+      const m = computeGrMetrics(o.id);
+      const scoreTxt = m.score !== null ? ` (${m.score}%)` : "";
       return `
         <li class="gr-item">
           <div class="gr-item-name">${escapeHtml(o.naam)}${scoreTxt}</div>
           <div class="gr-item-bar">
-            ${renderStatusSelect(prog.status, "gr-status", o.id)}
+            <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
             <button class="btn btn-secondary btn-sm" type="button" data-open-gr="${o.id}">Oefen</button>
           </div>
         </li>
@@ -498,36 +660,82 @@ function renderDashboard() {
   }
 }
 
-/* ---------- Tab 5a: Woordenschat Drill (100% offline, uitbreidbaar) ---------- */
+/* ---------- Tab 5a: Woordenschat (Uitbreidbaar VOCAB_MODES register) ---------- */
 
 const VOCAB_MODES = [
-  { id: "lijst", label: "Woordenlijst", render: renderVocabList },
-  { id: "flits", label: "Flitskaarten", render: renderVocabFlashcards },
-  { id: "invul", label: "Invuloefening", render: renderVocabCloze },
+  { id: "toets", label: "Toets & Inprenten", render: renderVocabQuiz },
+  { id: "invul", label: "Invuloefening (Zinnen)", render: renderVocabCloze },
   { id: "zinsbouw", label: "Zinsbouw-puzzel", render: renderVocabBuilder },
+  { id: "lijst", label: "Woordenlijst", render: renderVocabList },
+  { id: "flits", label: "Flitskaarten (Opwarming)", render: renderVocabFlashcards },
 ];
 
 function getSelectedVocabFields() {
   const all = App.curriculum.woordvelden;
   if (App.vocab.scope === "__mix_all") return all;
+  if (App.vocab.scope === "__mix_due") {
+    const withDue = all.filter((wf) => computeWfMetrics(wf).due > 0);
+    return withDue.length ? withDue : all;
+  }
   if (App.vocab.scope === "__mix_todo") {
-    const todo = all.filter((w) => getWfProgress(w.id).status !== "beheerst");
+    const todo = all.filter((wf) => computeWfMetrics(wf).status !== "beheerst");
     return todo.length ? todo : all;
   }
   const single = all.find((w) => w.id === App.vocab.scope);
   return single ? [single] : [all[0]];
 }
 
-function getVocabWordPool() {
-  const fields = getSelectedVocabFields();
-  return fields.flatMap((wf) =>
-    wf.woorden.map((w) => ({ ...w, wfId: wf.id, wfTitel: wf.titel_nl }))
-  );
+function getVocabGroupsForScope() {
+  if (App.vocab.scope.startsWith("__mix")) return [];
+  const wf = getSelectedVocabFields()[0];
+  const groups = [];
+  const seen = new Set();
+  for (const w of wf.woorden) {
+    if (w.groep && !seen.has(w.groep)) {
+      seen.add(w.groep);
+      groups.push(w.groep);
+    }
+  }
+  return groups;
 }
 
-function getVocabSentencePool() {
+function getVocabWordPool() {
   const fields = getSelectedVocabFields();
-  return fields.flatMap((wf) =>
+  let pool = fields.flatMap((wf) =>
+    wf.woorden.map((w) => ({ ...w, wfId: wf.id, wfTitel: wf.titel_nl }))
+  );
+  if (!App.vocab.scope.startsWith("__mix") && App.vocab.group !== "__all") {
+    const sub = pool.filter((w) => w.groep === App.vocab.group);
+    if (sub.length) pool = sub;
+  }
+  return pool;
+}
+
+function selectPriorityWords(pool, limit) {
+  const nowMs = Date.now();
+  const scored = pool.map((w) => {
+    const ws = getWordState(w.wfId, w.fr);
+    let priority = 3; // already practiced, not due yet
+    if (ws.box === 1) priority = 0; // fout geweest -> hoogste prioriteit
+    else if (isWordDue(ws, nowMs)) priority = 1; // gespreide herhaling vervallen
+    else if (ws.box === 0) priority = 2; // nieuw woord
+    const lastMs = ws.lastSeen ? Date.parse(ws.lastSeen) : 0;
+    return { w, priority, lastMs, rand: Math.random() };
+  });
+  scored.sort((a, b) => a.priority - b.priority || a.lastMs - b.lastMs || a.rand - b.rand);
+  return scored.slice(0, limit).map((x) => x.w);
+}
+
+function getBatchCacheKey() {
+  return `${App.vocab.scope}::${App.vocab.group}`;
+}
+
+function getActiveSentencePool() {
+  const key = getBatchCacheKey();
+  if (App.vocab.sentenceSource === "ai" && App.vocab.aiBatches[key]?.length) {
+    return App.vocab.aiBatches[key];
+  }
+  return getSelectedVocabFields().flatMap((wf) =>
     wf.voorbeelden.map((vb) => ({ ...vb, wfId: wf.id, wfTitel: wf.titel_nl }))
   );
 }
@@ -535,10 +743,11 @@ function getVocabSentencePool() {
 function initVocabControls() {
   const select = document.getElementById("vocab-wf-select");
   const wfOpts = App.curriculum.woordvelden
-    .map((wf) => `<option value="${wf.id}">${String(wf.nummer).padStart(2, "0")} · ${escapeHtml(wf.titel_nl)}</option>`)
+    .map((wf) => `<option value="${wf.id}">${String(wf.nummer).padStart(2, "0")} · ${escapeHtml(wf.titel_nl)} (${wf.woorden.length})</option>`)
     .join("");
   select.innerHTML = `
     <optgroup label="Slimme herhaling">
+      <option value="__mix_due">Herhaal · Vervallen &amp; moeilijke woorden</option>
       <option value="__mix_todo">Mix · Nog niet beheerste woordvelden</option>
       <option value="__mix_all">Mix · Alle 23 woordvelden</option>
     </optgroup>
@@ -553,33 +762,57 @@ function initVocabControls() {
     (m) => `<button type="button" class="mode-btn${m.id === App.vocab.mode ? " active" : ""}" data-vocab-mode="${m.id}" role="tab">${escapeHtml(m.label)}</button>`
   ).join("");
 
+  populateVocabGroups();
   renderVocabMeta();
+}
+
+function populateVocabGroups() {
+  const wrap = document.getElementById("vocab-group-wrap");
+  const sel = document.getElementById("vocab-group-select");
+  const groups = getVocabGroupsForScope();
+  if (!groups.length) {
+    wrap.classList.add("hidden");
+    App.vocab.group = "__all";
+    return;
+  }
+  wrap.classList.remove("hidden");
+  const wf = getSelectedVocabFields()[0];
+  sel.innerHTML = `<option value="__all">Alle deelthema's (${wf.woorden.length})</option>` +
+    groups.map((g) => {
+      const cnt = wf.woorden.filter((w) => w.groep === g).length;
+      return `<option value="${escapeHtml(g)}">${escapeHtml(g)} (${cnt})</option>`;
+    }).join("");
+  if (!groups.includes(App.vocab.group)) App.vocab.group = "__all";
+  sel.value = App.vocab.group;
 }
 
 function renderVocabMeta() {
   const wrap = document.getElementById("vocab-wf-meta");
   if (!wrap || !App.curriculum) return;
   if (App.vocab.scope.startsWith("__mix")) {
-    const fields = getSelectedVocabFields();
-    wrap.innerHTML = `<span class="muted">${fields.length} woordvelden in selectie</span>`;
+    const pool = getVocabWordPool();
+    const due = pool.filter((w) => isWordDue(getWordState(w.wfId, w.fr))).length;
+    wrap.innerHTML = `<span class="muted">${pool.length} woorden in selectie</span>${due ? `<span class="due-badge">↻ ${due} te herhalen</span>` : ""}`;
     return;
   }
   const wf = App.curriculum.woordvelden.find((w) => w.id === App.vocab.scope);
   if (!wf) return;
-  const prog = getWfProgress(wf.id);
-  const scoreTxt = prog.score !== null ? `<span class="score-badge">Laatste: ${prog.score}%</span>` : "";
+  const m = computeWfMetrics(wf);
   wrap.innerHTML = `
-    <span class="muted" style="font-style:italic;">${escapeHtml(wf.titel_fr)}</span>
-    ${scoreTxt}
-    ${renderStatusSelect(prog.status, "vocab-wf-status", wf.id)}
+    <span class="status-pill status-${m.status}">${STATUS_LABELS[m.status]}</span>
+    <span class="score-badge">${m.mastered}/${m.total} beheerst</span>
+    ${m.due > 0 ? `<span class="due-badge">↻ ${m.due} te herhalen</span>` : ""}
   `;
 }
 
 function openVocabField(wfId) {
   App.vocab.scope = wfId;
+  App.vocab.group = "__all";
   App.vocab.session = null;
+  App.vocab.aiError = "";
   const select = document.getElementById("vocab-wf-select");
   if (select) select.value = wfId;
+  populateVocabGroups();
   switchTab("drill", "vocab");
   renderVocabMeta();
 }
@@ -587,6 +820,7 @@ function openVocabField(wfId) {
 function setVocabMode(modeId) {
   App.vocab.mode = modeId;
   App.vocab.session = null;
+  App.vocab.aiError = "";
   document.querySelectorAll("#vocab-mode-bar .mode-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.vocabMode === modeId);
   });
@@ -600,156 +834,307 @@ function renderVocabStage() {
   mode.render(document.getElementById("vocab-stage"));
 }
 
-/* Mode 1: Woordenlijst */
-function renderVocabList(container) {
-  const words = getVocabWordPool();
-  const sentences = getVocabSentencePool();
-  const hide = App.vocab.hideMode;
-  const isMix = App.vocab.scope.startsWith("__mix");
+/* ---------- Batch AI Sentence Generator (compact <= 1500 tokens) ---------- */
 
-  const shownWords = isMix ? words.slice(0, 40) : words;
-  const hardCount = words.filter((w) => getWfProgress(w.wfId).hardWords.includes(w.fr)).length;
+async function generateAiVocabSentences() {
+  const pool = getVocabWordPool();
+  if (!pool.length) return;
+  const targets = selectPriorityWords(pool, 8);
+  const scopeLabel = App.vocab.scope.startsWith("__mix")
+    ? "Gemengde B1 woordenschat"
+    : getSelectedVocabFields()[0].titel_nl;
 
-  container.innerHTML = `
-    <div class="card">
-      <div class="stage-toolbar">
-        <div>
-          <strong>${shownWords.length} kernwoorden</strong>
-          ${isMix ? `<span class="muted"> (selectie van ${words.length})</span>` : ""}
-          ${hardCount ? `<span class="muted"> · ★ ${hardCount} moeilijk gemarkeerd</span>` : ""}
-        </div>
-        <div class="filter-group">
-          <button type="button" class="chip${hide === "none" ? " active" : ""}" data-hide="none">Toon alles</button>
-          <button type="button" class="chip${hide === "fr" ? " active" : ""}" data-hide="fr">Verberg Frans</button>
-          <button type="button" class="chip${hide === "nl" ? " active" : ""}" data-hide="nl">Verberg NL</button>
-        </div>
+  App.vocab.aiLoading = true;
+  App.vocab.aiError = "";
+  renderVocabStage();
+
+  try {
+    const wordLines = targets.map((w) => `- ${w.fr} (${w.nl})`).join("\n");
+    const prompt = [
+      `Maak voor een Vlaamse leerling (Frans niveau B1, thema: ${scopeLabel}) precies ${targets.length} gevarieerde, natuurlijke Franse voorbeeldzinnen (8-15 woorden per zin): één zin per doelwoord.`,
+      `Doelwoorden:\n${wordLines}`,
+      `Geef UITSLUITEND een JSON-array terug met objecten: {"targetWord":"exact Frans doelwoord uit de lijst","fr":"Franse zin","nl":"natuurlijke Nederlandse vertaling","gat":"het exacte ingevulde Franse woord/woordgroep zoals het letterlijk in fr staat"}.`,
+      `Regels: "gat" moet letterlijk in "fr" voorkomen, geen lidwoorden/spaties fout, duidelijke context.`,
+    ].join("\n\n");
+
+    const parsed = await callGemini({ prompt, jsonMode: true, maxOutputTokens: 1100 });
+    if (!Array.isArray(parsed)) throw new Error("Onverwacht antwoordformaat van Gemini.");
+
+    const byLower = new Map(targets.map((t) => [t.fr.toLowerCase(), t]));
+    const valid = [];
+    for (const item of parsed) {
+      if (!item || typeof item.fr !== "string" || typeof item.nl !== "string" || typeof item.gat !== "string") continue;
+      if (!item.fr.includes(item.gat)) continue;
+      const matched = byLower.get(String(item.targetWord || "").toLowerCase()) || targets[valid.length] || targets[0];
+      valid.push({
+        fr: item.fr.trim(),
+        nl: item.nl.trim(),
+        gat: item.gat.trim(),
+        wfId: matched.wfId,
+        wfTitel: matched.wfTitel,
+        targetWord: matched.fr,
+        isAi: true,
+      });
+    }
+    if (!valid.length) throw new Error("Geen geldige zinnen ontvangen. Probeer opnieuw.");
+
+    App.vocab.aiBatches[getBatchCacheKey()] = valid;
+    App.vocab.sentenceSource = "ai";
+    App.vocab.session = null;
+  } catch (err) {
+    App.vocab.aiError = err.message;
+  } finally {
+    App.vocab.aiLoading = false;
+    renderVocabStage();
+  }
+}
+
+function renderSentenceSourceBar() {
+  const key = getBatchCacheKey();
+  const aiCount = App.vocab.aiBatches[key]?.length || 0;
+  const localCount = getSelectedVocabFields().reduce((s, wf) => s + wf.voorbeelden.length, 0);
+  const usingAi = App.vocab.sentenceSource === "ai" && aiCount > 0;
+  return `
+    <div class="ai-batch-bar">
+      <div>
+        <strong>Bron zinnen:</strong>
+        ${usingAi ? `✨ AI-batch (${aiCount} verse zinnen op maat van zwakke woorden)` : `Lokale cursus (${localCount} voorbeeldzinnen)`}
       </div>
-      <div class="word-table">
-        ${shownWords.map((w) => {
-          const isHard = getWfProgress(w.wfId).hardWords.includes(w.fr);
-          return `
-            <div class="word-row${isHard ? " is-hard" : ""}">
-              <div class="word-pair">
-                <span class="word-fr${hide === "fr" ? " word-blurred" : ""}" data-reveal="1">${escapeHtml(w.fr)}</span>
-                <span class="word-nl${hide === "nl" ? " word-blurred" : ""}" data-reveal="1">${escapeHtml(w.nl)}</span>
-              </div>
-              <div class="word-row-actions">
-                <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(w.fr)}" title="Luister uitspraak">🔊</button>
-                <button type="button" class="mini-icon-btn${isHard ? " active-star" : ""}" data-hard-wf="${w.wfId}" data-hard-word="${escapeHtml(w.fr)}" title="Markeer als moeilijk">★</button>
-              </div>
-            </div>
-          `;
-        }).join("")}
+      <div class="btn-row">
+        <button type="button" class="chip${!usingAi ? " active" : ""}" data-sent-source="local">Lokaal (${localCount})</button>
+        ${aiCount > 0 ? `<button type="button" class="chip${usingAi ? " active" : ""}" data-sent-source="ai">✨ AI-batch (${aiCount})</button>` : ""}
+        <button type="button" class="btn btn-primary btn-sm" data-ai-batch="generate" ${App.vocab.aiLoading ? "disabled" : ""}>
+          ${App.vocab.aiLoading ? "Zinnen genereren…" : aiCount ? "✨ Nieuwe AI-zinnen" : "✨ Genereer AI-zinnen (batch)"}
+        </button>
       </div>
-      ${!isMix && sentences.length ? `
-        <h3 style="margin:1.25rem 0 0.5rem;font-size:0.98rem;">Voorbeeldzinnen in context</h3>
-        <div class="examples-list">
-          ${sentences.map((s) => `
-            <div class="example-item">
-              <div>
-                <div><strong>${escapeHtml(s.fr)}</strong></div>
-                <div class="muted">${escapeHtml(s.nl)}</div>
-              </div>
-              <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(s.fr)}" title="Luister zin">🔊</button>
-            </div>
-          `).join("")}
-        </div>
-      ` : ""}
     </div>
+    ${App.vocab.aiError ? `<div class="banner error">${escapeHtml(App.vocab.aiError)}</div>` : ""}
   `;
 }
 
-/* Mode 2: Flitskaarten */
-function startFlashSession() {
-  let pool = getVocabWordPool();
-  if (App.vocab.flashHardOnly) {
-    const hard = pool.filter((w) => getWfProgress(w.wfId).hardWords.includes(w.fr));
-    if (hard.length) pool = hard;
-  }
-  const deck = shuffleArray(pool).slice(0, App.vocab.scope.startsWith("__mix") ? 15 : pool.length);
+/* ---------- Mode 1: Toets & Inprenten (eerlijke toetsing + herhalingslus) ---------- */
+
+function buildMcOptions(target, fullPool) {
+  const distractors = shuffleArray(fullPool.filter((w) => w.fr !== target.fr)).slice(0, 3);
+  return shuffleArray([target, ...distractors]).map((w) => w.fr);
+}
+
+function startQuizSession() {
+  const pool = getVocabWordPool();
+  const selected = selectPriorityWords(pool, Math.min(App.vocab.quizCount, pool.length));
+  const queue = selected.map((w) => {
+    const ws = getWordState(w.wfId, w.fr);
+    let askMode = "type";
+    if (App.vocab.quizStyle === "mc") askMode = "mc";
+    else if (App.vocab.quizStyle === "adaptief" && ws.box === 0 && pool.length >= 4) askMode = "mc";
+    return {
+      word: w,
+      askMode,
+      options: askMode === "mc" ? buildMcOptions(w, pool) : null,
+      isRetry: false,
+      firstAttemptRecorded: false,
+    };
+  });
   App.vocab.session = {
-    type: "flits",
-    deck,
-    idx: 0,
-    flipped: false,
-    known: 0,
-    retry: 0,
+    type: "toets",
+    queue,
+    initialTotal: queue.length,
+    firstCorrect: 0,
+    firstPartial: 0,
+    firstWrong: 0,
+    retriesCompleted: 0,
+    answered: false,
+    lastResult: null,
     done: false,
   };
 }
 
-function renderVocabFlashcards(container) {
-  if (!App.vocab.session || App.vocab.session.type !== "flits") startFlashSession();
+function renderVocabQuiz(container) {
+  if (!App.vocab.session || App.vocab.session.type !== "toets") startQuizSession();
   const s = App.vocab.session;
-  const dir = App.vocab.flashDir;
 
-  if (!s.deck.length) {
-    container.innerHTML = `<div class="card muted">Geen woorden in deze selectie.</div>`;
+  if (!s.queue.length && !s.done) {
+    container.innerHTML = `<div class="card muted">Geen woorden beschikbaar in deze selectie.</div>`;
     return;
   }
 
+  const controlsHtml = `
+    <div class="stage-toolbar">
+      <div class="filter-group">
+        <button type="button" class="chip${App.vocab.quizStyle === "adaptief" ? " active" : ""}" data-quiz-style="adaptief">Adaptief (aanbevolen)</button>
+        <button type="button" class="chip${App.vocab.quizStyle === "type" ? " active" : ""}" data-quiz-style="type">Enkel schrijven (streng)</button>
+        <button type="button" class="chip${App.vocab.quizStyle === "mc" ? " active" : ""}" data-quiz-style="mc">Meerkeuze (opwarming)</button>
+      </div>
+      <div class="filter-group">
+        ${[10, 15, 20].map((n) => `<button type="button" class="chip${App.vocab.quizCount === n ? " active" : ""}" data-quiz-count="${n}">${n} woorden</button>`).join("")}
+      </div>
+    </div>
+  `;
+
   if (s.done) {
-    const pct = Math.round((s.known / s.deck.length) * 100);
+    const pct = Math.round(((s.firstCorrect + s.firstPartial * 0.5) / Math.max(1, s.initialTotal)) * 100);
     container.innerHTML = `
-      <div class="card summary-box">
-        <h3>Flitskaarten afgerond!</h3>
-        <div class="summary-score">${pct}%</div>
-        <p class="muted">${s.known} van ${s.deck.length} gekend · ${s.retry} gemarkeerd om nog te oefenen</p>
-        <div class="btn-row" style="justify-content:center;margin-top:1rem;">
-          <button type="button" class="btn btn-primary" data-flash-action="restart">Opnieuw oefenen</button>
-          <button type="button" class="btn btn-secondary" data-vocab-mode="invul">Ga naar Invuloefening →</button>
+      <div class="card exercise-card">
+        ${controlsHtml}
+        <div class="summary-box">
+          <h3>Toets &amp; Inprenten afgerond!</h3>
+          <div class="summary-score">${pct}%</div>
+          <p class="muted">
+            Eerste poging: <strong>${s.firstCorrect}</strong> juist · <strong>${s.firstPartial}</strong> bijna (accent/lidwoord) · <strong>${s.firstWrong}</strong> fout
+            ${s.retriesCompleted ? `<br>Extra ingeprent in herhaalronde: <strong>${s.retriesCompleted}×</strong>` : ""}
+          </p>
+          <p class="muted">Je per-woord voortgang en herhaaldata zijn automatisch opgeslagen.</p>
+          <div class="btn-row" style="justify-content:center;margin-top:1rem;">
+            <button type="button" class="btn btn-primary" data-quiz-action="restart">Volgende reeks (${App.vocab.quizCount} woorden)</button>
+            <button type="button" class="btn btn-secondary" data-vocab-mode="invul">Oefen in zinnen →</button>
+          </div>
         </div>
       </div>
     `;
     return;
   }
 
-  const card = s.deck[s.idx];
-  const frontLang = dir === "nl-fr" ? "Nederlands" : "Frans";
-  const backLang = dir === "nl-fr" ? "Frans" : "Nederlands";
-  const frontText = dir === "nl-fr" ? card.nl : card.fr;
-  const backText = dir === "nl-fr" ? card.fr : card.nl;
+  const cur = s.queue[0];
+  const ws = getWordState(cur.word.wfId, cur.word.fr);
+  const remaining = s.queue.length;
+
+  let inputAreaHtml = "";
+  if (cur.askMode === "mc") {
+    inputAreaHtml = `
+      <div class="mc-grid">
+        ${cur.options.map((opt, idx) => {
+          let cls = "mc-option";
+          if (s.answered) {
+            if (opt === cur.word.fr) cls += " is-correct";
+            else if (opt === s.lastResult?.given) cls += " is-wrong";
+          }
+          return `<button type="button" class="${cls}" data-quiz-mc="${idx}" ${s.answered ? "disabled" : ""}>${escapeHtml(opt)}</button>`;
+        }).join("")}
+      </div>
+    `;
+  } else {
+    inputAreaHtml = `
+      <input id="vocab-answer-input" class="quiz-input" type="text" value="${escapeHtml(s.lastResult?.given || "")}" ${s.answered ? "disabled" : ""} spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Typ het Franse woord (inclusief lidwoord indien van toepassing)…" />
+      ${!s.answered ? renderAccentBar("vocab-answer-input") : ""}
+      <div class="btn-row" style="margin-top:0.6rem;">
+        ${!s.answered ? `
+          <button type="button" class="btn btn-primary" data-quiz-action="check">Controleer</button>
+          <button type="button" class="btn btn-secondary" data-quiz-action="reveal">Ik weet het niet</button>
+        ` : ""}
+      </div>
+    `;
+  }
+
+  let feedbackHtml = "";
+  if (s.answered && s.lastResult) {
+    const r = s.lastResult;
+    const cls = r.kind === "exact" ? "ok" : (r.kind === "accent" || r.kind === "article") ? "warn" : "error";
+    const headline =
+      r.kind === "exact"
+        ? (cur.askMode === "mc" ? "Juist herkend! (Komt later nog terug als schrijfoefening)" : "Helemaal juist!")
+        : r.kind === "accent"
+          ? "Bijna! Let op het accent — dit woord komt zo meteen nog eens terug om in te prenten."
+          : r.kind === "article"
+            ? "Juiste stam, maar vergeet het lidwoord niet — komt zo meteen nog eens terug."
+            : "Nog niet gekend — dit woord komt achteraan in deze reeks opnieuw terug als schrijfoefening.";
+
+    feedbackHtml = `
+      <div class="feedback-box ${cls}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;">
+          <div>
+            <strong>${headline}</strong>
+            <div style="margin-top:0.25rem;font-size:1.05rem;"><strong>${escapeHtml(cur.word.fr)}</strong> — ${escapeHtml(cur.word.nl)}</div>
+          </div>
+          <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(cur.word.fr)}" title="Luister uitspraak">🔊</button>
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:0.8rem;">
+        <button type="button" class="btn btn-primary" id="btn-quiz-next" data-quiz-action="next">Volgende →</button>
+      </div>
+    `;
+  }
 
   container.innerHTML = `
-    <div class="card">
-      <div class="stage-toolbar">
-        <span class="muted">Kaart <strong>${s.idx + 1} / ${s.deck.length}</strong> · Gekend: ${s.known}</span>
-        <div class="filter-group">
-          <button type="button" class="chip${dir === "nl-fr" ? " active" : ""}" data-flash-dir="nl-fr">NL → FR</button>
-          <button type="button" class="chip${dir === "fr-nl" ? " active" : ""}" data-flash-dir="fr-nl">FR → NL</button>
-          <button type="button" class="chip${App.vocab.flashHardOnly ? " active" : ""}" data-flash-hard="toggle">★ Enkel moeilijk</button>
-        </div>
+    <div class="card exercise-card">
+      ${controlsHtml}
+      <div class="exercise-progress">
+        <span>Nog <strong>${remaining}</strong> te gaan in deze reeks${cur.word.groep ? ` · ${escapeHtml(cur.word.groep)}` : ""}</span>
+        <span style="display:inline-flex;align-items:center;gap:0.5rem;">
+          ${cur.isRetry ? `<span class="retry-badge">↻ Inprent-herhaling</span>` : ""}
+          ${renderMasteryDots(ws.box)}
+        </span>
       </div>
-      <div class="flashcard-wrap">
-        <div class="flashcard${s.flipped ? " flipped" : ""}" data-flash-action="flip" tabindex="0" role="button">
-          <span class="flashcard-lang">${s.flipped ? backLang : frontLang}</span>
-          <span class="flashcard-text">${escapeHtml(s.flipped ? backText : frontText)}</span>
-          <span class="flashcard-hint">${s.flipped ? escapeHtml(frontText) : "Klik op de kaart om om te draaien"}</span>
-          ${(s.flipped || dir === "fr-nl") ? `<button type="button" class="btn btn-secondary btn-sm" data-speak="${escapeHtml(card.fr)}">🔊 Luister Frans</button>` : ""}
-        </div>
-        <div class="flashcard-controls">
-          ${s.flipped ? `
-            <button type="button" class="btn btn-ghost-danger" data-flash-action="retry">↻ Nog oefenen</button>
-            <button type="button" class="btn btn-primary" data-flash-action="known">✓ Ken ik</button>
-          ` : `
-            <button type="button" class="btn btn-primary" data-flash-action="flip">Toon antwoord</button>
-          `}
-        </div>
+      <div class="quiz-prompt-box">
+        <div class="quiz-prompt-label">${cur.askMode === "mc" ? "Kies het juiste Franse woord (opwarming)" : "Vertaal naar het Frans (actief schrijven)"}</div>
+        <div class="quiz-prompt-word">${escapeHtml(cur.word.nl)}</div>
+        ${App.vocab.scope.startsWith("__mix") ? `<div class="muted">${escapeHtml(cur.word.wfTitel)}</div>` : ""}
       </div>
+      ${inputAreaHtml}
+      ${feedbackHtml}
     </div>
   `;
+
+  if (!s.answered && cur.askMode === "type") {
+    const inp = document.getElementById("vocab-answer-input");
+    if (inp) inp.focus();
+  }
 }
 
-/* Mode 3: Contextuele invuloefening (Cloze) */
+function evaluateQuizAttempt(kind, given) {
+  const s = App.vocab.session;
+  if (!s || s.type !== "toets" || s.answered) return;
+  const cur = s.queue[0];
+
+  if (!cur.firstAttemptRecorded) {
+    cur.firstAttemptRecorded = true;
+    if (kind === "exact") s.firstCorrect += 1;
+    else if (kind === "accent" || kind === "article") s.firstPartial += 1;
+    else s.firstWrong += 1;
+    updateWordMastery(cur.word.wfId, cur.word.fr, kind, cur.askMode === "type");
+  } else if (kind === "exact") {
+    s.retriesCompleted += 1;
+  }
+
+  s.answered = true;
+  s.lastResult = { kind, given };
+  renderVocabStage();
+}
+
+function advanceQuizQueue() {
+  const s = App.vocab.session;
+  if (!s || s.type !== "toets" || !s.answered) return;
+  const cur = s.queue.shift();
+  const kind = s.lastResult?.kind;
+
+  // Fout, accentfout of lidwoordfout -> opnieuw achteraan als actieve schrijfoefening om in te prenten!
+  if (kind !== "exact") {
+    s.queue.push({
+      word: cur.word,
+      askMode: "type",
+      options: null,
+      isRetry: true,
+      firstAttemptRecorded: true,
+    });
+  }
+
+  s.answered = false;
+  s.lastResult = null;
+  if (!s.queue.length) {
+    s.done = true;
+  }
+  renderVocabStage();
+}
+
+/* ---------- Mode 2: Contextuele invuloefening (Zinnen + AI-batch) ---------- */
+
 function startClozeSession() {
-  const pool = shuffleArray(getVocabSentencePool());
-  const items = App.vocab.scope.startsWith("__mix") ? pool.slice(0, 8) : pool;
+  const pool = shuffleArray(getActiveSentencePool());
+  const items = pool.slice(0, Math.min(8, pool.length));
   App.vocab.session = {
     type: "invul",
-    items,
-    idx: 0,
+    queue: items.map((item) => ({ item, isRetry: false, recorded: false })),
+    initialTotal: items.length,
     points: 0,
-    perWf: {},
     answered: false,
     lastResult: null,
     done: false,
@@ -759,21 +1144,23 @@ function startClozeSession() {
 function renderVocabCloze(container) {
   if (!App.vocab.session || App.vocab.session.type !== "invul") startClozeSession();
   const s = App.vocab.session;
+  const sourceBar = renderSentenceSourceBar();
 
-  if (!s.items.length) {
-    container.innerHTML = `<div class="card muted">Geen voorbeeldzinnen gevonden.</div>`;
+  if (!s.queue.length && !s.done) {
+    container.innerHTML = `${sourceBar}<div class="card muted">Geen voorbeeldzinnen gevonden.</div>`;
     return;
   }
 
   if (s.done) {
-    const pct = Math.round((s.points / s.items.length) * 100);
+    const pct = Math.round((s.points / Math.max(1, s.initialTotal)) * 100);
     container.innerHTML = `
+      ${sourceBar}
       <div class="card summary-box">
         <h3>Invuloefening klaar!</h3>
         <div class="summary-score">${pct}%</div>
-        <p class="muted">Score: ${s.points} / ${s.items.length} · Voortgang automatisch bewaard</p>
+        <p class="muted">Eerste poging: ${s.points} / ${s.initialTotal} · Per-woord voortgang bijgewerkt</p>
         <div class="btn-row" style="justify-content:center;margin-top:1rem;">
-          <button type="button" class="btn btn-primary" data-cloze-action="restart">Opnieuw oefenen</button>
+          <button type="button" class="btn btn-primary" data-cloze-action="restart">Nieuwe reeks zinnen</button>
           <button type="button" class="btn btn-secondary" data-vocab-mode="zinsbouw">Ga naar Zinsbouw-puzzel →</button>
         </div>
       </div>
@@ -781,7 +1168,8 @@ function renderVocabCloze(container) {
     return;
   }
 
-  const item = s.items[s.idx];
+  const cur = s.queue[0];
+  const item = cur.item;
   const gapIdx = item.fr.indexOf(item.gat);
   const before = gapIdx >= 0 ? item.fr.slice(0, gapIdx) : "";
   const after = gapIdx >= 0 ? item.fr.slice(gapIdx + item.gat.length) : "";
@@ -794,8 +1182,8 @@ function renderVocabCloze(container) {
       r.kind === "exact"
         ? `<strong>Helemaal juist!</strong> ${escapeHtml(item.fr)}`
         : r.kind === "accent"
-          ? `<strong>Bijna! Let op het accent/hoofdletter:</strong> <code>${escapeHtml(item.gat)}</code> (0,5 pt)<br>${escapeHtml(item.fr)}`
-          : `<strong>Niet helemaal.</strong> Juiste woord: <strong>${escapeHtml(item.gat)}</strong><br>${escapeHtml(item.fr)}`;
+          ? `<strong>Bijna! Let op het accent:</strong> <code>${escapeHtml(item.gat)}</code> (komt nog eens terug)<br>${escapeHtml(item.fr)}`
+          : `<strong>Niet helemaal.</strong> Juiste woord: <strong>${escapeHtml(item.gat)}</strong> (komt achteraan opnieuw terug)<br>${escapeHtml(item.fr)}`;
     feedbackHtml = `
       <div class="feedback-box ${cls}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;">
@@ -807,22 +1195,23 @@ function renderVocabCloze(container) {
   }
 
   container.innerHTML = `
+    ${sourceBar}
     <div class="card exercise-card">
       <div class="exercise-progress">
-        <span>Zin ${s.idx + 1} van ${s.items.length}${App.vocab.scope.startsWith("__mix") ? ` · ${escapeHtml(item.wfTitel)}` : ""}</span>
-        <span>Score: ${s.points} / ${s.items.length}</span>
+        <span>Nog <strong>${s.queue.length}</strong> zin(nen) in deze reeks${item.isAi ? " · ✨ AI-zin" : ""}</span>
+        <span>${cur.isRetry ? `<span class="retry-badge">↻ Herhaalzin</span>` : `Score: ${s.points} / ${s.initialTotal}`}</span>
       </div>
       <div class="muted">Vertaling (hint): <strong>${escapeHtml(item.nl)}</strong></div>
       <div class="cloze-sentence">
         ${escapeHtml(before)}<input id="cloze-answer" class="cloze-input" type="text" value="${escapeHtml(s.lastResult?.given || "")}" ${s.answered ? "disabled" : ""} spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="…" />${escapeHtml(after)}
       </div>
-      ${!s.answered ? renderAccentBar() : ""}
+      ${!s.answered ? renderAccentBar("cloze-answer") : ""}
       <div class="btn-row">
         ${!s.answered ? `
           <button type="button" class="btn btn-primary" data-cloze-action="check">Controleer</button>
-          <button type="button" class="btn btn-secondary" data-cloze-action="hint">Eerste letter</button>
+          <button type="button" class="btn btn-secondary" data-cloze-action="reveal">Toon antwoord</button>
         ` : `
-          <button type="button" class="btn btn-primary" data-cloze-action="next">${s.idx + 1 < s.items.length ? "Volgende zin →" : "Bekijk resultaat"}</button>
+          <button type="button" class="btn btn-primary" data-cloze-action="next">Volgende →</button>
         `}
       </div>
       ${feedbackHtml}
@@ -835,7 +1224,31 @@ function renderVocabCloze(container) {
   }
 }
 
-/* Mode 4: Zinsbouw-puzzel */
+function submitClozeAnswer(forceWrong = false) {
+  const s = App.vocab.session;
+  if (!s || s.type !== "invul" || s.answered) return;
+  const inp = document.getElementById("cloze-answer");
+  const given = forceWrong ? "" : (inp ? inp.value : "");
+  const cur = s.queue[0];
+  const item = cur.item;
+  const kind = forceWrong ? "wrong" : checkClozeAnswer(given, item.gat);
+
+  if (!cur.recorded) {
+    cur.recorded = true;
+    const pts = kind === "exact" ? 1 : kind === "accent" ? 0.5 : 0;
+    s.points += pts;
+    const linkedWord = item.targetWord || findMatchingWordForGat(item.wfId, item.gat);
+    if (linkedWord) {
+      updateWordMastery(item.wfId, linkedWord, kind, true);
+    }
+  }
+  s.answered = true;
+  s.lastResult = { kind, given };
+  renderVocabStage();
+}
+
+/* ---------- Mode 3: Zinsbouw-puzzel (Lokaal + AI-batch) ---------- */
+
 function splitSentenceForBuilder(fr) {
   const m = fr.trim().match(/^(.*?)([.?!])$/);
   const body = m ? m[1] : fr.trim();
@@ -852,9 +1265,8 @@ function splitSentenceForBuilder(fr) {
 }
 
 function startBuilderSession() {
-  const pool = shuffleArray(getVocabSentencePool());
-  const raw = App.vocab.scope.startsWith("__mix") ? pool.slice(0, 6) : pool;
-  const items = raw.map((item) => ({
+  const pool = shuffleArray(getActiveSentencePool());
+  const items = pool.slice(0, Math.min(6, pool.length)).map((item) => ({
     ...item,
     ...splitSentenceForBuilder(item.fr),
   }));
@@ -864,7 +1276,7 @@ function startBuilderSession() {
     idx: 0,
     selected: [],
     points: 0,
-    perWf: {},
+    usedHint: false,
     answered: false,
     wasCorrect: false,
     done: false,
@@ -874,22 +1286,24 @@ function startBuilderSession() {
 function renderVocabBuilder(container) {
   if (!App.vocab.session || App.vocab.session.type !== "zinsbouw") startBuilderSession();
   const s = App.vocab.session;
+  const sourceBar = renderSentenceSourceBar();
 
   if (!s.items.length) {
-    container.innerHTML = `<div class="card muted">Geen zinnen beschikbaar.</div>`;
+    container.innerHTML = `${sourceBar}<div class="card muted">Geen zinnen beschikbaar.</div>`;
     return;
   }
 
   if (s.done) {
-    const pct = Math.round((s.points / s.items.length) * 100);
+    const pct = Math.round((s.points / Math.max(1, s.items.length)) * 100);
     container.innerHTML = `
+      ${sourceBar}
       <div class="card summary-box">
         <h3>Zinsbouw-puzzel voltooid!</h3>
         <div class="summary-score">${pct}%</div>
-        <p class="muted">${s.points} van ${s.items.length} zinnen correct gebouwd · Voortgang automatisch bewaard</p>
+        <p class="muted">${s.points} van ${s.items.length} zinnen zelfstandig correct gebouwd</p>
         <div class="btn-row" style="justify-content:center;margin-top:1rem;">
-          <button type="button" class="btn btn-primary" data-builder-action="restart">Opnieuw spelen</button>
-          <button type="button" class="btn btn-secondary" data-vocab-mode="lijst">Terug naar Woordenlijst</button>
+          <button type="button" class="btn btn-primary" data-builder-action="restart">Nieuwe puzzels</button>
+          <button type="button" class="btn btn-secondary" data-vocab-mode="toets">Terug naar Toets &amp; Inprenten</button>
         </div>
       </div>
     `;
@@ -915,9 +1329,10 @@ function renderVocabBuilder(container) {
   }
 
   container.innerHTML = `
+    ${sourceBar}
     <div class="card exercise-card">
       <div class="exercise-progress">
-        <span>Puzzel ${s.idx + 1} van ${s.items.length}${App.vocab.scope.startsWith("__mix") ? ` · ${escapeHtml(item.wfTitel)}` : ""}</span>
+        <span>Puzzel ${s.idx + 1} van ${s.items.length}${item.isAi ? " · ✨ AI-zin" : ""}</span>
         <span>Score: ${s.points} / ${s.items.length}</span>
       </div>
       <div class="muted">Bouw de Franse zin voor: <strong>${escapeHtml(item.nl)}</strong></div>
@@ -945,15 +1360,132 @@ function renderVocabBuilder(container) {
   `;
 }
 
-function finalizeVocabScores(perWf, fallbackPct) {
-  if (!App.vocab.scope.startsWith("__mix")) {
-    recordWfScore(App.vocab.scope, fallbackPct);
+/* ---------- Mode 4: Woordenlijst (met automatische mastery-stipjes) ---------- */
+
+function renderVocabList(container) {
+  const words = getVocabWordPool();
+  const hide = App.vocab.hideMode;
+  const q = App.vocab.listSearch.trim().toLowerCase();
+  const lf = App.vocab.listFilter;
+
+  const filtered = words.filter((w) => {
+    const ws = getWordState(w.wfId, w.fr);
+    if (lf === "nieuw" && ws.box !== 0) return false;
+    if (lf === "herhalen" && !(ws.box === 1 || isWordDue(ws))) return false;
+    if (lf === "beheerst" && ws.box < 3) return false;
+    if (q && !w.fr.toLowerCase().includes(q) && !w.nl.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const shown = filtered.slice(0, 150);
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="stage-toolbar">
+        <div class="toolbar">
+          <input id="vocab-list-search" class="input input-sm" type="search" value="${escapeHtml(App.vocab.listSearch)}" placeholder="Zoek woord…" />
+          <div class="filter-group">
+            <button type="button" class="chip${lf === "all" ? " active" : ""}" data-list-filter="all">Alle (${words.length})</button>
+            <button type="button" class="chip${lf === "nieuw" ? " active" : ""}" data-list-filter="nieuw">Nieuw</button>
+            <button type="button" class="chip${lf === "herhalen" ? " active" : ""}" data-list-filter="herhalen">Herhalen</button>
+            <button type="button" class="chip${lf === "beheerst" ? " active" : ""}" data-list-filter="beheerst">Beheerst</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <button type="button" class="chip${hide === "none" ? " active" : ""}" data-hide="none">Toon alles</button>
+          <button type="button" class="chip${hide === "fr" ? " active" : ""}" data-hide="fr">Verberg Frans</button>
+          <button type="button" class="chip${hide === "nl" ? " active" : ""}" data-hide="nl">Verberg NL</button>
+        </div>
+      </div>
+      <div class="word-table">
+        ${shown.length ? shown.map((w) => {
+          const ws = getWordState(w.wfId, w.fr);
+          return `
+            <div class="word-row${ws.box === 1 ? " is-hard" : ""}">
+              <div class="word-pair">
+                <span class="word-fr${hide === "fr" ? " word-blurred" : ""}" data-reveal="1">${escapeHtml(w.fr)}</span>
+                <span class="word-nl${hide === "nl" ? " word-blurred" : ""}" data-reveal="1">${escapeHtml(w.nl)}</span>
+              </div>
+              <div class="word-row-actions">
+                ${renderMasteryDots(ws.box)}
+                <button type="button" class="mini-icon-btn" data-speak="${escapeHtml(w.fr)}" title="Luister uitspraak">🔊</button>
+              </div>
+            </div>
+          `;
+        }).join("") : `<p class="muted">Geen woorden gevonden voor deze filter.</p>`}
+      </div>
+      ${filtered.length > shown.length ? `<p class="muted" style="margin-top:0.75rem;">Eerste ${shown.length} van ${filtered.length} woorden getoond. Gebruik het deelthema- of zoekfilter om te verfijnen.</p>` : ""}
+    </div>
+  `;
+}
+
+/* ---------- Mode 5: Flitskaarten (enkel opwarming, telt niet als beheersing) ---------- */
+
+function startFlashSession() {
+  const pool = getVocabWordPool();
+  const deck = selectPriorityWords(pool, Math.min(15, pool.length));
+  App.vocab.session = { type: "flits", deck, idx: 0, flipped: false, done: false };
+}
+
+function renderVocabFlashcards(container) {
+  if (!App.vocab.session || App.vocab.session.type !== "flits") startFlashSession();
+  const s = App.vocab.session;
+  const dir = App.vocab.flashDir;
+
+  if (!s.deck.length) {
+    container.innerHTML = `<div class="card muted">Geen woorden in deze selectie.</div>`;
     return;
   }
-  for (const [wfId, stat] of Object.entries(perWf)) {
-    if (stat.total > 0) recordWfScore(wfId, (stat.pts / stat.total) * 100);
+
+  if (s.done) {
+    container.innerHTML = `
+      <div class="card summary-box">
+        <h3>Opwarming afgerond!</h3>
+        <p class="muted">Klaar voor de echte test? Start <strong>Toets &amp; Inprenten</strong> om je officiële voortgang op te bouwen.</p>
+        <div class="btn-row" style="justify-content:center;margin-top:1rem;">
+          <button type="button" class="btn btn-primary" data-vocab-mode="toets">Start Toets &amp; Inprenten →</button>
+          <button type="button" class="btn btn-secondary" data-flash-action="restart">Nog een opwarmreeks</button>
+        </div>
+      </div>
+    `;
+    return;
   }
+
+  const card = s.deck[s.idx];
+  const frontLang = dir === "nl-fr" ? "Nederlands" : "Frans";
+  const backLang = dir === "nl-fr" ? "Frans" : "Nederlands";
+  const frontText = dir === "nl-fr" ? card.nl : card.fr;
+  const backText = dir === "nl-fr" ? card.fr : card.nl;
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="stage-toolbar">
+        <span class="muted">Opwarming · Kaart <strong>${s.idx + 1} / ${s.deck.length}</strong> (telt niet als beheerst)</span>
+        <div class="filter-group">
+          <button type="button" class="chip${dir === "nl-fr" ? " active" : ""}" data-flash-dir="nl-fr">NL → FR</button>
+          <button type="button" class="chip${dir === "fr-nl" ? " active" : ""}" data-flash-dir="fr-nl">FR → NL</button>
+        </div>
+      </div>
+      <div class="flashcard-wrap">
+        <div class="flashcard${s.flipped ? " flipped" : ""}" data-flash-action="flip" tabindex="0" role="button">
+          <span class="flashcard-lang">${s.flipped ? backLang : frontLang}</span>
+          <span class="flashcard-text">${escapeHtml(s.flipped ? backText : frontText)}</span>
+          <span class="flashcard-hint">${s.flipped ? escapeHtml(frontText) : "Klik op de kaart om om te draaien"}</span>
+          ${(s.flipped || dir === "fr-nl") ? `<button type="button" class="btn btn-secondary btn-sm" data-speak="${escapeHtml(card.fr)}">🔊 Luister Frans</button>` : ""}
+        </div>
+        <div class="flashcard-controls">
+          ${s.flipped ? `
+            <button type="button" class="btn btn-primary" data-flash-action="next">Volgende kaart →</button>
+          ` : `
+            <button type="button" class="btn btn-primary" data-flash-action="flip">Toon vertaling</button>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
 }
+
+/* ---------- Vocab Stage Event Delegation ---------- */
 
 function handleVocabStageClick(e) {
   const speakBtn = e.target.closest("[data-speak]");
@@ -969,82 +1501,68 @@ function handleVocabStageClick(e) {
     return;
   }
 
-  // Word list actions
-  const hideBtn = e.target.closest("[data-hide]");
-  if (hideBtn) {
-    App.vocab.hideMode = hideBtn.dataset.hide;
+  // AI batch sentences controls
+  const srcBtn = e.target.closest("[data-sent-source]");
+  if (srcBtn) {
+    App.vocab.sentenceSource = srcBtn.dataset.sentSource;
+    App.vocab.session = null;
     renderVocabStage();
     return;
   }
 
-  const revealEl = e.target.closest("[data-reveal]");
-  if (revealEl && revealEl.classList.contains("word-blurred")) {
-    revealEl.classList.toggle("revealed");
+  if (e.target.closest("[data-ai-batch]")) {
+    generateAiVocabSentences();
     return;
   }
 
-  const hardBtn = e.target.closest("[data-hard-wf]");
-  if (hardBtn) {
-    toggleHardWord(hardBtn.dataset.hardWf, hardBtn.dataset.hardWord);
-    renderVocabStage();
-    return;
-  }
-
-  // Flashcards actions
-  const flashDirBtn = e.target.closest("[data-flash-dir]");
-  if (flashDirBtn) {
-    App.vocab.flashDir = flashDirBtn.dataset.flashDir;
-    startFlashSession();
-    renderVocabStage();
-    return;
-  }
-
-  if (e.target.closest("[data-flash-hard]")) {
-    App.vocab.flashHardOnly = !App.vocab.flashHardOnly;
-    startFlashSession();
-    renderVocabStage();
-    return;
-  }
-
-  const flashAct = e.target.closest("[data-flash-action]");
-  if (flashAct && App.vocab.session?.type === "flits") {
-    const s = App.vocab.session;
-    const act = flashAct.dataset.flashAction;
-    if (act === "restart") {
-      startFlashSession();
-    } else if (act === "flip") {
-      s.flipped = !s.flipped;
-    } else if (act === "known" || act === "retry") {
-      const card = s.deck[s.idx];
-      if (act === "known") {
-        s.known += 1;
-        if (getWfProgress(card.wfId).hardWords.includes(card.fr)) {
-          toggleHardWord(card.wfId, card.fr);
-        }
-      } else {
-        s.retry += 1;
-        if (!getWfProgress(card.wfId).hardWords.includes(card.fr)) {
-          toggleHardWord(card.wfId, card.fr);
-        }
-      }
-      if (s.idx + 1 < s.deck.length) {
-        s.idx += 1;
-        s.flipped = false;
-      } else {
-        s.done = true;
-        if (!App.vocab.scope.startsWith("__mix")) {
-          recordWfScore(App.vocab.scope, (s.known / s.deck.length) * 100);
-        }
-      }
-    }
-    renderVocabStage();
-    return;
-  }
-
-  // Accent bar
+  // Accent buttons
   const accBtn = e.target.closest("[data-accent]");
   if (accBtn) {
-    insertAtCursor(document.getElementById("cloze-answer"), accBtn.dataset.accent);
+    insertAtCursor(document.getElementById(accBtn.dataset.accentTarget), accBtn.dataset.accent);
+    return;
+  }
+
+  // Quiz controls & actions
+  const qStyle = e.target.closest("[data-quiz-style]");
+  if (qStyle) {
+    App.vocab.quizStyle = qStyle.dataset.quizStyle;
+    startQuizSession();
+    renderVocabStage();
+    return;
+  }
+
+  const qCount = e.target.closest("[data-quiz-count]");
+  if (qCount) {
+    App.vocab.quizCount = Number(qCount.dataset.quizCount);
+    startQuizSession();
+    renderVocabStage();
+    return;
+  }
+
+  const mcBtn = e.target.closest("[data-quiz-mc]");
+  if (mcBtn && App.vocab.session?.type === "toets" && !App.vocab.session.answered) {
+    const cur = App.vocab.session.queue[0];
+    const picked = cur.options[Number(mcBtn.dataset.quizMc)];
+    evaluateQuizAttempt(picked === cur.word.fr ? "exact" : "wrong", picked);
+    return;
+  }
+
+  const qAct = e.target.closest("[data-quiz-action]");
+  if (qAct && App.vocab.session?.type === "toets") {
+    const act = qAct.dataset.quizAction;
+    if (act === "restart") {
+      startQuizSession();
+      renderVocabStage();
+    } else if (act === "check") {
+      const inp = document.getElementById("vocab-answer-input");
+      const given = inp ? inp.value : "";
+      const kind = checkVocabTypedAnswer(given, App.vocab.session.queue[0].word.fr);
+      if (kind !== "empty") evaluateQuizAttempt(kind, given);
+    } else if (act === "reveal") {
+      evaluateQuizAttempt("wrong", "");
+    } else if (act === "next") {
+      advanceQuizQueue();
+    }
     return;
   }
 
@@ -1056,30 +1574,24 @@ function handleVocabStageClick(e) {
     if (act === "restart") {
       startClozeSession();
       renderVocabStage();
-    } else if (act === "hint") {
-      const inp = document.getElementById("cloze-answer");
-      const target = s.items[s.idx].gat;
-      if (inp && !inp.value) {
-        inp.value = target.slice(0, Math.min(2, target.length));
-        inp.focus();
-      }
     } else if (act === "check") {
-      submitClozeAnswer();
+      submitClozeAnswer(false);
+    } else if (act === "reveal") {
+      submitClozeAnswer(true);
     } else if (act === "next") {
-      if (s.idx + 1 < s.items.length) {
-        s.idx += 1;
-        s.answered = false;
-        s.lastResult = null;
-      } else {
-        s.done = true;
-        finalizeVocabScores(s.perWf, (s.points / s.items.length) * 100);
+      const cur = s.queue.shift();
+      if (s.lastResult?.kind !== "exact") {
+        s.queue.push({ item: cur.item, isRetry: true, recorded: true });
       }
+      s.answered = false;
+      s.lastResult = null;
+      if (!s.queue.length) s.done = true;
       renderVocabStage();
     }
     return;
   }
 
-  // Sentence builder actions
+  // Builder actions
   const pickBtn = e.target.closest("[data-builder-pick]");
   if (pickBtn && App.vocab.session?.type === "zinsbouw" && !App.vocab.session.answered) {
     const s = App.vocab.session;
@@ -1094,8 +1606,7 @@ function handleVocabStageClick(e) {
 
   const remBtn = e.target.closest("[data-builder-remove]");
   if (remBtn && App.vocab.session?.type === "zinsbouw" && !App.vocab.session.answered) {
-    const pos = Number(remBtn.dataset.builderRemove);
-    App.vocab.session.selected.splice(pos, 1);
+    App.vocab.session.selected.splice(Number(remBtn.dataset.builderRemove), 1);
     renderVocabStage();
     return;
   }
@@ -1110,6 +1621,7 @@ function handleVocabStageClick(e) {
     } else if (act === "clear") {
       s.selected = [];
     } else if (act === "hint") {
+      s.usedHint = true;
       const nextWord = item.tokens[s.selected.length];
       if (nextWord) {
         const usedIds = new Set(s.selected.map((t) => t.id));
@@ -1118,41 +1630,77 @@ function handleVocabStageClick(e) {
       }
     } else if (act === "check") {
       const built = s.selected.map((t) => t.word).join(" ");
-      const expected = item.tokens.join(" ");
-      s.wasCorrect = normalizeFr(built) === normalizeFr(expected);
+      s.wasCorrect = normalizeFr(built) === normalizeFr(item.tokens.join(" "));
       s.answered = true;
-      const pts = s.wasCorrect ? 1 : 0;
-      s.points += pts;
-      const st = s.perWf[item.wfId] || { pts: 0, total: 0 };
-      s.perWf[item.wfId] = { pts: st.pts + pts, total: st.total + 1 };
+      if (s.wasCorrect && !s.usedHint) s.points += 1;
+      const linkedWord = item.targetWord || findMatchingWordForGat(item.wfId, item.gat);
+      if (linkedWord) {
+        updateWordMastery(item.wfId, linkedWord, s.wasCorrect && !s.usedHint ? "exact" : "wrong", true);
+      }
     } else if (act === "next") {
       if (s.idx + 1 < s.items.length) {
         s.idx += 1;
         s.selected = [];
+        s.usedHint = false;
         s.answered = false;
       } else {
         s.done = true;
-        finalizeVocabScores(s.perWf, (s.points / s.items.length) * 100);
+      }
+    }
+    renderVocabStage();
+    return;
+  }
+
+  // Word list controls
+  const hideBtn = e.target.closest("[data-hide]");
+  if (hideBtn) {
+    App.vocab.hideMode = hideBtn.dataset.hide;
+    renderVocabStage();
+    return;
+  }
+
+  const lfBtn = e.target.closest("[data-list-filter]");
+  if (lfBtn) {
+    App.vocab.listFilter = lfBtn.dataset.listFilter;
+    renderVocabStage();
+    return;
+  }
+
+  const revealEl = e.target.closest("[data-reveal]");
+  if (revealEl && revealEl.classList.contains("word-blurred")) {
+    revealEl.classList.toggle("revealed");
+    return;
+  }
+
+  // Flashcards (warmup only)
+  const flashDirBtn = e.target.closest("[data-flash-dir]");
+  if (flashDirBtn) {
+    App.vocab.flashDir = flashDirBtn.dataset.flashDir;
+    startFlashSession();
+    renderVocabStage();
+    return;
+  }
+
+  const flashAct = e.target.closest("[data-flash-action]");
+  if (flashAct && App.vocab.session?.type === "flits") {
+    const s = App.vocab.session;
+    const act = flashAct.dataset.flashAction;
+    if (act === "restart") {
+      startFlashSession();
+    } else if (act === "flip") {
+      s.flipped = !s.flipped;
+    } else if (act === "next") {
+      const card = s.deck[s.idx];
+      updateWordMastery(card.wfId, card.fr, "warmup", false);
+      if (s.idx + 1 < s.deck.length) {
+        s.idx += 1;
+        s.flipped = false;
+      } else {
+        s.done = true;
       }
     }
     renderVocabStage();
   }
-}
-
-function submitClozeAnswer() {
-  const s = App.vocab.session;
-  if (!s || s.type !== "invul" || s.answered) return;
-  const inp = document.getElementById("cloze-answer");
-  const given = inp ? inp.value : "";
-  const item = s.items[s.idx];
-  const kind = checkFrenchAnswer(given, item.gat);
-  const pts = kind === "exact" ? 1 : kind === "accent" ? 0.5 : 0;
-  s.points += pts;
-  const st = s.perWf[item.wfId] || { pts: 0, total: 0 };
-  s.perWf[item.wfId] = { pts: st.pts + pts, total: st.total + 1 };
-  s.answered = true;
-  s.lastResult = { kind, given };
-  renderVocabStage();
 }
 
 /* ---------- Settings Modal ---------- */
@@ -1243,8 +1791,10 @@ async function importProgressJson(file) {
   try {
     const parsed = JSON.parse(await file.text());
     App.progress = normalizeProgress(parsed);
+    App.vocab.session = null;
     scheduleSaveProgress();
     renderDashboard();
+    if (App.activeTab === "drill") renderVocabStage();
     showConfigFeedback("Voortgang succesvol geïmporteerd en opgeslagen.");
   } catch {
     showConfigFeedback("Ongeldig JSON-bestand.", true);
@@ -1275,13 +1825,6 @@ function bindEvents() {
     renderDashboard();
   });
 
-  document.getElementById("tab-dashboard").addEventListener("change", (e) => {
-    const wfId = e.target.dataset.wfStatus;
-    const grId = e.target.dataset.grStatus;
-    if (wfId) setWfStatus(wfId, e.target.value);
-    if (grId) setGrStatus(grId, e.target.value);
-  });
-
   document.getElementById("tab-dashboard").addEventListener("click", (e) => {
     const tabBtn = e.target.closest("[data-goto-tab]");
     if (tabBtn) switchTab(tabBtn.dataset.gotoTab);
@@ -1293,13 +1836,18 @@ function bindEvents() {
 
   document.getElementById("vocab-wf-select").addEventListener("change", (e) => {
     App.vocab.scope = e.target.value;
+    App.vocab.group = "__all";
     App.vocab.session = null;
+    App.vocab.aiError = "";
+    populateVocabGroups();
     renderVocabStage();
   });
 
-  document.getElementById("vocab-wf-meta").addEventListener("change", (e) => {
-    const wfId = e.target.dataset.vocabWfStatus;
-    if (wfId) setWfStatus(wfId, e.target.value);
+  document.getElementById("vocab-group-select").addEventListener("change", (e) => {
+    App.vocab.group = e.target.value;
+    App.vocab.session = null;
+    App.vocab.aiError = "";
+    renderVocabStage();
   });
 
   document.getElementById("vocab-mode-bar").addEventListener("click", (e) => {
@@ -1307,11 +1855,31 @@ function bindEvents() {
     if (btn) setVocabMode(btn.dataset.vocabMode);
   });
 
-  document.getElementById("vocab-stage").addEventListener("click", handleVocabStageClick);
-  document.getElementById("vocab-stage").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.id === "cloze-answer") {
+  const stage = document.getElementById("vocab-stage");
+  stage.addEventListener("click", handleVocabStageClick);
+  stage.addEventListener("input", (e) => {
+    if (e.target.id === "vocab-list-search") {
+      App.vocab.listSearch = e.target.value;
+      const pos = e.target.selectionStart;
+      renderVocabStage();
+      const el = document.getElementById("vocab-list-search");
+      if (el) {
+        el.focus();
+        el.setSelectionRange(pos, pos);
+      }
+    }
+  });
+  stage.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    if (e.target.id === "vocab-answer-input" && App.vocab.session?.type === "toets") {
       e.preventDefault();
-      submitClozeAnswer();
+      if (!App.vocab.session.answered) {
+        const kind = checkVocabTypedAnswer(e.target.value, App.vocab.session.queue[0].word.fr);
+        if (kind !== "empty") evaluateQuizAttempt(kind, e.target.value);
+      }
+    } else if (e.target.id === "cloze-answer" && App.vocab.session?.type === "invul") {
+      e.preventDefault();
+      if (!App.vocab.session.answered) submitClozeAnswer(false);
     }
   });
 
@@ -1340,8 +1908,10 @@ function bindEvents() {
   document.getElementById("btn-reset-progress").addEventListener("click", () => {
     if (!confirm("Weet je zeker dat je alle voortgang wilt wissen?")) return;
     App.progress = defaultProgress();
+    App.vocab.session = null;
     scheduleSaveProgress();
     renderDashboard();
+    if (App.activeTab === "drill") renderVocabStage();
     showConfigFeedback("Voortgang gewist.");
   });
 }

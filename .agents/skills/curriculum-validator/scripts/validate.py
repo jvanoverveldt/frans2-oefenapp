@@ -30,10 +30,10 @@ if len(wf) != 23:
 for field in wf:
     n_w = len(field.get("woorden", []))
     n_v = len(field.get("voorbeelden", []))
-    if not (15 <= n_w <= 25):
-        errs.append(f"{field.get('id')}: {n_w} woorden (verwacht ~20)")
-    if n_v != 3:
-        errs.append(f"{field.get('id')}: {n_v} voorbeelden (verwacht 3)")
+    if n_w < 20:
+        errs.append(f"{field.get('id')}: {n_w} woorden (verwacht >= 20)")
+    if n_v < 3:
+        errs.append(f"{field.get('id')}: {n_v} voorbeelden (verwacht >= 3)")
     for vb in field.get("voorbeelden", []):
         if vb.get("gat") not in vb.get("fr", ""):
             errs.append(f"{field.get('id')}: gat '{vb.get('gat')}' niet in '{vb.get('fr')}'")

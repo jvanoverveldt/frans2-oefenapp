@@ -824,7 +824,168 @@ body {
 }
 
 .drill-field {
-  flex: 1 1 280px;
+  flex: 1 1 260px;
+}
+
+.drill-field-sm {
+  flex: 0 1 230px;
+}
+
+.wf-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--muted);
+  gap: 0.5rem;
+}
+
+.due-badge {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #b45309;
+  background: var(--warn-soft);
+  border: 1px solid #fde68a;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.mastery-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.mastery-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.mastery-dot.filled {
+  background: var(--primary);
+}
+
+.mastery-dot.mastered {
+  background: var(--ok);
+}
+
+.mastery-dot.weak {
+  background: var(--warn);
+}
+
+/* Vocabulary Quiz & Spaced Repetition */
+.quiz-prompt-box {
+  padding: 1.15rem 1.25rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 0.75rem 0;
+  text-align: center;
+}
+
+.quiz-prompt-label {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.quiz-prompt-word {
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: var(--text);
+  margin: 0.3rem 0;
+}
+
+.quiz-input {
+  width: 100%;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 600;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+}
+
+.quiz-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.mc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+  margin: 0.85rem 0;
+}
+
+.mc-option {
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.mc-option:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.mc-option.is-correct {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: #065f46;
+}
+
+.mc-option.is-wrong {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #991b1b;
+}
+
+.retry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.ai-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  border: 1px solid #dbeafe;
+  margin-bottom: 0.9rem;
+  font-size: 0.86rem;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .drill-field label {
